@@ -1,2 +1,2 @@
-anthropic>=0.116.0
+# The model call is one POST over stdlib urllib — no LLM SDK needed.
 slack_bolt>=1.21.0

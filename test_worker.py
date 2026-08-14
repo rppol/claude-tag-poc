@@ -7,9 +7,9 @@ No framework, no fixtures. The fake clients here are also the seam the browser
 simulator will drive later.
 """
 
+import json
 import os
 import tempfile
-import types
 
 import db
 import worker
@@ -28,21 +28,19 @@ class FakeSlack:
         return {"ok": True}
 
 
-class FakeClaude:
-    """Shaped like the real response: content is a list of typed blocks."""
+class FakeLLM:
+    """Anything with .complete(system, user) satisfies the worker."""
 
     def __init__(self, text="the answer", raises=None):
         self._text = text
         self._raises = raises
         self.calls = []
-        self.messages = types.SimpleNamespace(create=self._create)
 
-    def _create(self, **kwargs):
-        self.calls.append(kwargs)
+    def complete(self, system, user):
+        self.calls.append({"system": system, "user": user})
         if self._raises:
             raise self._raises
-        block = types.SimpleNamespace(type="text", text=self._text)
-        return types.SimpleNamespace(content=[block], stop_reason="end_turn")
+        return self._text
 
 
 def fresh_db():
@@ -78,16 +76,18 @@ def test_failure_requeues_then_gives_up():
     conn = fresh_db()
     db.enqueue(conn, "e1", "C1", "111.0", "U1", "hi")
     slack = FakeSlack([{"user": "U1", "text": "hi"}])
-    claude = FakeClaude(raises=RuntimeError("api down"))
+    llm = FakeLLM(raises=RuntimeError("429 rate limited"))
 
     for expected in ("queued", "queued", "failed"):
-        assert worker.run_once(conn, slack, claude) is True
+        assert worker.run_once(conn, slack, llm) is True
         status = conn.execute("SELECT status FROM runs").fetchone()["status"]
         assert status == expected, f"expected {expected}, got {status}"
 
     # Terminal, not looping: nothing left to claim.
-    assert worker.run_once(conn, slack, claude) is False
-    assert claude.calls and len(claude.calls) == 3, len(claude.calls)
+    assert worker.run_once(conn, slack, llm) is False
+    assert len(llm.calls) == 3, len(llm.calls)
+    # Nothing was posted to Slack on a failed run.
+    assert slack.posted == [], slack.posted
 
 
 def test_end_to_end_with_fakes():
@@ -97,9 +97,9 @@ def test_end_to_end_with_fakes():
         {"user": "U1", "text": "prod is 500ing"},
         {"user": "U2", "text": "<@BOT> what broke?"},
     ])
-    claude = FakeClaude(text="Looks like the retry config.")
+    llm = FakeLLM(text="Looks like the retry config.")
 
-    assert worker.run_once(conn, slack, claude) is True
+    assert worker.run_once(conn, slack, llm) is True
 
     row = conn.execute("SELECT * FROM runs").fetchone()
     assert row["status"] == "done", row["status"]
@@ -111,14 +111,40 @@ def test_end_to_end_with_fakes():
     ], slack.posted
 
     # Both speakers reached the model, each attributed.
-    sent = claude.calls[0]["messages"][0]["content"]
+    sent = llm.calls[0]["user"]
     assert "<@U1>: prod is 500ing" in sent, sent
     assert "<@U2>: <@BOT> what broke?" in sent, sent
+    assert "Slack mrkdwn" in llm.calls[0]["system"], "system prompt did not reach the model"
 
-    # Params the API rejects on Opus 5 must never appear.
-    for banned in ("temperature", "top_p", "top_k", "thinking"):
-        assert banned not in claude.calls[0], f"{banned} 400s on {worker.MODEL}"
-    assert claude.calls[0]["model"] == "claude-opus-5"
+
+def test_only_free_models():
+    """The brief is free models only — a paid id would bill silently."""
+    assert worker.MODEL.endswith(":free"), worker.MODEL
+
+
+def test_empty_completion_is_an_error_not_an_empty_post():
+    """Observed for real: a free-tier model can return content: null. Without
+    this guard the worker posts a blank message into the thread."""
+    import urllib.request
+
+    class FakeResponse:
+        def __init__(self, payload): self._p = json.dumps(payload).encode()
+        def read(self, *a): return self._p
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    real = urllib.request.urlopen
+    urllib.request.urlopen = lambda req, timeout=None: FakeResponse(
+        {"model": "some/model:free", "choices": [{"message": {"content": None}}]}
+    )
+    try:
+        try:
+            worker.OpenRouter(key="test").complete("sys", "user")
+            raise AssertionError("expected an error, got a silent empty answer")
+        except RuntimeError as e:
+            assert "empty completion" in str(e), str(e)
+    finally:
+        urllib.request.urlopen = real
 
 
 if __name__ == "__main__":

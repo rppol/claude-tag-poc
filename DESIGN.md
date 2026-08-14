@@ -50,9 +50,13 @@ The architecture didn't disappear. It stopped being code we own.
 
 **Thread transcript, not just the mention.** `conversations_replies` gives Claude the room. Every line is prefixed with its Slack user id, because without attribution the model cannot tell who asked what in a thread where three people are talking.
 
-**Opus 5 specifics that are easy to get wrong.** Thinking is **on by default** (unlike Opus 4.8), and `max_tokens` caps thinking *plus* response text together — hence 16000, not 1024. `budget_tokens`, `temperature`, `top_p`, and `top_k` all return a 400 on this model; depth is `output_config={"effort": ...}`. A test asserts none of them ever appear in a request.
+**No LLM SDK.** OpenRouter is OpenAI-compatible, so the model call is one POST. `urllib` from the standard library does it in about twenty lines, which is smaller than the import statement's worth of dependency. `requirements.txt` has one entry, and it's Slack's.
 
-**Top-level `cache_control`.** Auto-places on the last cacheable block. Inert while a thread is short — Opus 5 needs a 512-token prefix to cache at all — and starts paying by itself once a real conversation gets long. One line, so it stays.
+**A pinned free model, not the auto-router.** `openrouter/free` looks like the lazy answer and isn't: it routed a plain chat request to `nemotron-3.5-content-safety:free`, a classifier, which returned `content: null`. The default is pinned to `nemotron-3-super-120b-a12b:free` and overridable by env var.
+
+**An empty completion is an error.** That `content: null` is the reason `complete()` raises instead of returning. Without the guard the worker posts a blank message into the thread and marks the run `done` — a silent failure that looks like success. A test pins the behaviour.
+
+**The model is not the interesting part.** Swapping Claude for a free Nemotron changed one function and no architecture. The queue, the ack seam, the dedupe, and the retry ceiling are all indifferent to what generates the text — which is the argument this whole repo is making.
 
 **Attempts ceiling.** A run that crashes deterministically would otherwise requeue forever. Three strikes, then `failed` with the error recorded.
 

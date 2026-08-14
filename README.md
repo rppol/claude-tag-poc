@@ -32,20 +32,36 @@ The tests drive the real code path with fake Slack and Claude clients, so the qu
 
 ## Run it for real
 
-Needs a Slack app and an Anthropic key.
+Needs a Slack app and an OpenRouter key. The model call goes through OpenRouter,
+which is OpenAI-compatible, so it's one POST over `urllib` — there's no LLM SDK
+in `requirements.txt`.
 
 ```bash
 pip install -r requirements.txt
 
-export SLACK_BOT_TOKEN=xoxb-...   # Bot User OAuth Token
-export SLACK_APP_TOKEN=xapp-...   # App-Level Token, for Socket Mode
-export ANTHROPIC_API_KEY=sk-ant-...
+export SLACK_BOT_TOKEN=xoxb-...          # Bot User OAuth Token
+export SLACK_APP_TOKEN=xapp-...          # App-Level Token, for Socket Mode
+export OPENROUTER_API_KEY=sk-or-v1-...
 
 python3 app.py     # terminal 1 — Slack listener
 python3 worker.py  # terminal 2 — does the work
 ```
 
 Then invite the bot to a channel and `@mention` it.
+
+**Model.** Defaults to `nvidia/nemotron-3-super-120b-a12b:free` — free tier only.
+Override with `OPENROUTER_MODEL`; `google/gemma-4-31b-it:free` also works. Don't
+reach for OpenRouter's `openrouter/free` auto-router: it can route to a
+special-purpose model (a content-safety classifier, in testing) that returns no
+content at all.
+
+**On macOS**, if you get `CERTIFICATE_VERIFY_FAILED`, your Python has no CA
+bundle. Either run `Install Certificates.command` from your Python's Applications
+folder, or:
+
+```bash
+export SSL_CERT_FILE="$(python3 -c 'import certifi; print(certifi.where())')"
+```
 
 ### Slack app setup
 
@@ -70,12 +86,13 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 
 ## Status
 
-- Queue, dedupe, claim, retry ceiling, and request shape — **verified by tests**, green in CI.
+- Queue, dedupe, claim, retry ceiling, empty-completion guard — **verified by tests**, green in CI.
 - The simulator — **verified in a browser**: retry storm collapses 3 events to 1 run, crash requeues and resumes.
-- Live Slack + Anthropic round trip — **not yet run**. It needs credentials that weren't available when this was written.
+- Live model round trip — **verified**. A real thread went to `nemotron-3-super-120b:free` and came back with an answer that cited a detail from a message *other* than the one that tagged the bot, which is the whole point of sending the transcript rather than the mention.
+- Live Slack round trip — **not yet run**; needs a workspace and a bot token.
 
 ## Why the simulator is scripted
 
-It runs no model and holds no key. Calling the Anthropic API from a public page would mean shipping the key in client-side JS, where anyone can read it — Anthropic gates that behind a header named `anthropic-dangerous-direct-browser-access`, and the name is the warning.
+It runs no model and holds no key. Calling any model API from a public page means shipping the key in client-side JS, where anyone with devtools can take it — and a key on a page served from GitHub Pages is a key you have published. That's true of OpenRouter, and Anthropic gates the equivalent behind a header named `anthropic-dangerous-direct-browser-access`, where the name is the warning.
 
-The trade is a good one: "an LLM returns text" isn't the interesting part of Claude Tag. The state machine is — the ack seam, the dedupe, the claim, the requeue — and that's what the page actually runs.
+The trade is a good one: "an LLM returns text" isn't the interesting part of Claude Tag. The state machine is — the ack seam, the dedupe, the claim, the requeue — and that's what the page actually runs. The real backend does call a live model; see Status above.
