@@ -29,6 +29,11 @@ for u in urls:
     dest = OUT / "fonts" / name
     if not dest.exists():
         dest.write_bytes(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=60).read())
+    # A short or non-woff2 file renders as a silent fallback font rather than an
+    # error, so check it here where the build can still fail loudly.
+    blob = dest.read_bytes()
+    if len(blob) < 1000 or blob[:4] != b"wOF2":
+        sys.exit(f"{name}: {len(blob)} bytes, magic {blob[:4]!r} — not a usable woff2")
     css = css.replace(u, f"fonts/{name}")
 
 (OUT / "fonts.css").write_text(

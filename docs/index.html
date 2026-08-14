@@ -21,7 +21,7 @@
 </header>
 
 <!-- ══════════════════════ SIMULATOR ══════════════════════ -->
-<main id="view-sim" role="tabpanel" aria-labelledby="tab-sim" class="view on">
+<main id="view-sim" role="tabpanel" aria-labelledby="tab-sim" class="view on" tabindex="0">
 <div class="workspace">
 
   <div class="rail">
@@ -59,6 +59,10 @@
     </div>
     <div class="scenarios">
       <span class="sc-label">Scenarios</span>
+      <p class="legend"><b>What is real:</b> the ack seam, the queue and its dedupe, the lease
+      and retry ceiling are implemented and tested in the repo. Memory, MCP, A2A, LangGraph and
+      ambient are <b>designed and drawn here, not built</b> — each scenario says which it is.
+      Latencies, token counts and IDs below are illustrative, not measurements.</p>
       <div class="sc-grid" id="scenarios"></div>
     </div>
   </section>
@@ -89,7 +93,7 @@
 </main>
 
 <!-- ══════════════════════ ARCHITECTURE ══════════════════════ -->
-<main id="view-arch" role="tabpanel" aria-labelledby="tab-arch" class="view">
+<div id="view-arch" role="tabpanel" aria-labelledby="tab-arch" class="view" tabindex="0" hidden>
   <div class="arch">
 
     <section class="arch-hero">
@@ -162,10 +166,10 @@
     </section>
 
   </div>
-</main>
+</div>
 
 <!-- ══════════════════════ ROLLOUT PLAN ══════════════════════ -->
-<main id="view-plan" role="tabpanel" aria-labelledby="tab-plan" class="view">
+<div id="view-plan" role="tabpanel" aria-labelledby="tab-plan" class="view" tabindex="0" hidden>
   <div class="arch">
 
     <section class="arch-hero">
@@ -205,10 +209,10 @@
     </section>
 
   </div>
-</main>
+</div>
 
 <footer class="foot">
-  <span>Simulation only — no model runs here and no key is held. The scenarios replay a designed system so its behaviour can be inspected.</span>
+  <span>Simulation only — no model runs here and no key is held. The scenarios illustrate a designed system; they are not a recording of one that ran.</span>
   <a href="https://github.com/rppol/claude-tag-poc">Source</a>
 </footer>
 

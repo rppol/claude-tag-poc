@@ -1,6 +1,6 @@
 flowchart TB
   subgraph MCP ["MCP · reaching a tool you own"]
-    direction LR
+    direction TB
     EX["Executor"] --> POL{"policy gate<br/>allowlist + always_ask"}
     POL -- "denied" --> DN["refused, logged"]
     POL -- "ask" --> HU["human approves in thread"]
@@ -11,7 +11,7 @@ flowchart TB
   end
 
   subgraph A2A ["A2A · handing work to another agent"]
-    direction LR
+    direction TB
     PL["Planner"] --> CARD["fetch agent card<br/>skills, auth, endpoint"]
     CARD --> TASK["create task"]
     TASK --> ST{"task lifecycle"}

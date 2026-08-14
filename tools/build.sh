@@ -28,7 +28,19 @@ echo "→ copying static files"
 cp docs/index.html docs/style.css docs/sim.js "$OUT/"
 
 echo "→ checking nothing is fetched at runtime"
-if grep -rInE 'https?://(?!github\.com)' "$OUT"/*.html "$OUT"/*.css "$OUT"/*.js -P 2>/dev/null | grep -v 'github.com/rppol'; then
-  echo "FAIL: a runtime asset still points off-site"; exit 1
+# Previous version passed -E and -P together, which grep rejects outright; the
+# error went to /dev/null and the pipeline's exit status came from `grep -v`,
+# so the guard could never fail. It is now a plain -E over every built asset,
+# with the grep's own status captured rather than a pipeline's.
+# w3.org is excluded because xmlns="http://www.w3.org/2000/svg" is an XML
+# namespace identifier, not a fetch — nothing resolves it over the network.
+offsite=$(grep -rIoE 'https?://[a-zA-Z0-9.-]+|(^|[^:a-z])//[a-zA-Z0-9.-]+\.[a-z]' \
+            --include='*.html' --include='*.css' --include='*.js' --include='*.svg' \
+            "$OUT" 2>&1 | grep -vE 'github\.com|www\.w3\.org' || true)
+if [ -n "$offsite" ]; then
+  echo "FAIL: a runtime asset points off-site:"; echo "$offsite" | sed 's/^/  /' | sort -u | head -20
+  exit 1
 fi
+echo "  no off-site references in $(find "$OUT" -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.svg' \) | wc -l | tr -d ' ') assets"
+
 echo "✓ built $(find "$OUT" -type f | wc -l | tr -d ' ') files into $OUT/"

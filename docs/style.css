@@ -13,7 +13,8 @@
 
   /* machine */
   --ink:#141019; --ink-2:#1D1725; --ink-3:#2A2136; --ink-4:#3A2F49;
-  --mono:#CFC6DA; --mono-dim:#807392;
+  --mono:#CFC6DA; --mono-dim:#9C8FB0;   /* 6.0:1 on --ink */
+  --mono-quiet:#8B7FA0;                /* measured 5.0:1 on --ink — an estimate said 4.6 and was wrong */
   --mint:#4FD8AA; --amber:#EDAE55; --rust:#DB6A50; --iris:#A683D6;
 
   --r:10px; --r-lg:16px;
@@ -127,7 +128,7 @@ code{font-family:var(--code);font-size:.9em}
   display:flex;flex-direction:column;overflow:hidden}
 .box-in:focus-within{border-color:var(--plum);box-shadow:0 0 0 1px var(--plum)}
 .box-in input{border:0;outline:0;padding:11px 13px 4px;font:inherit;color:var(--text);background:none}
-.box-in input::placeholder{color:#A69EAE}
+.box-in input::placeholder{color:#6F6878}
 .box-tools{display:flex;gap:3px;padding:2px 9px 7px;color:#8E8697;font-size:12px}
 .box-tools span{padding:2px 6px;border-radius:4px}
 .send{border:0;border-radius:var(--r);background:var(--plum);color:#fff;padding:0 18px;
@@ -157,7 +158,7 @@ code{font-family:var(--code);font-size:.9em}
 .rt-sec:last-child{border:0;flex:1;min-height:0;display:flex;flex-direction:column}
 .rt-sec h2{margin:0 0 9px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mono-dim);font-weight:600}
-.rt-sec h2 em{font-style:normal;text-transform:none;letter-spacing:0;color:var(--ink-4);margin-left:6px;
+.rt-sec h2 em{font-style:normal;text-transform:none;letter-spacing:0;color:var(--mono-quiet);margin-left:6px;
   font-family:var(--code);font-size:10px}
 
 .ingress{background:var(--ink-2);border:1px solid var(--ink-3);border-radius:var(--r);padding:11px 13px}
@@ -173,7 +174,7 @@ code{font-family:var(--code);font-size:.9em}
   padding:5px 7px;border-radius:7px;font-size:12px}
 .lanes li .pip{width:7px;height:7px;border-radius:50%;background:var(--ink-4)}
 .lanes li .nm{font-family:var(--disp);font-weight:500;color:var(--mono-dim);font-size:12.5px}
-.lanes li .st{font-family:var(--code);font-size:10.5px;color:var(--ink-4)}
+.lanes li .st{font-family:var(--code);font-size:10.5px;color:var(--mono-quiet)}
 .lanes li.act{background:var(--ink-2)}
 .lanes li.act .pip{background:var(--mint)}
 .lanes li.act .nm{color:#fff}
@@ -215,7 +216,14 @@ code{font-family:var(--code);font-size:.9em}
 
 .figure{margin:0;background:var(--ink-2);border:1px solid var(--ink-3);border-radius:var(--r-lg);
   padding:22px;overflow-x:auto}
-.diagram{display:block;max-width:100%;height:auto;margin:0 auto}
+/* max-width:none so the figure's overflow-x:auto is real. Six of eight
+   diagrams are wider than the column; scaling them to fit rendered label
+   text at 1.7-6.6px, which is legible to nobody. Scroll beats squint. */
+.diagram{display:block;max-width:none;height:auto}
+.figure{position:relative}
+.figure::after{content:'scroll →';position:absolute;right:10px;bottom:6px;
+  font-family:var(--code);font-size:10px;color:var(--mono-quiet);pointer-events:none}
+@media (min-width:1100px){.figure:has(.diagram[width='704']),.figure:has(.diagram[width='958']){}}
 
 .callout{margin-top:20px;border:1px solid var(--ink-3);background:var(--ink-2);
   border-radius:var(--r-lg);padding:18px 22px}
@@ -231,7 +239,7 @@ code{font-family:var(--code);font-size:.9em}
 .ag-card .goal{color:var(--mono);font-size:13.5px;line-height:1.55;margin:0 0 11px}
 .ag-card dl{margin:0;font-size:12px;font-family:var(--code);color:var(--mono-dim);
   display:grid;grid-template-columns:44px 1fr;gap:3px 8px}
-.ag-card dt{color:var(--ink-4)}
+.ag-card dt{color:var(--mono-quiet)}
 .ag-card dd{margin:0}
 
 .proto{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:22px}
@@ -301,7 +309,7 @@ code{font-family:var(--code);font-size:.9em}
 .ckpt b{font-family:var(--code);color:var(--iris);font-weight:600}
 .tstats{display:flex;gap:14px;margin-bottom:9px;font-family:var(--code);font-size:10.5px;color:var(--mono-dim)}
 .tstats b{font-family:var(--code);color:var(--mono);font-weight:600}
-.trace .tx em{font-style:normal;color:var(--ink-4);margin-left:5px}
+.trace .tx em{font-style:normal;color:var(--mono-quiet);margin-left:5px}
 .trace .tx code{background:var(--ink-2);border:1px solid var(--ink-3);padding:0 4px;border-radius:3px;color:var(--mono)}
 .trace .tx i{color:var(--mono-dim)}
 
@@ -313,3 +321,21 @@ code{font-family:var(--code);font-size:.9em}
 .rt-sec:last-child{min-height:130px}
 .scenarios{flex:0 0 auto;max-height:172px;overflow-y:auto}
 .sc-grid{grid-template-columns:repeat(auto-fill,minmax(152px,1fr))}
+
+/* ── scenario strip: at narrow widths the capped height overflowed its grid
+      cell and the runtime panel painted over it, leaving 7 of 9 buttons
+      unclickable. Let the row size to content instead. ─────────────────── */
+@media (max-width:900px){
+  .scenarios{max-height:none;overflow:visible}
+  .workspace{grid-auto-rows:auto}
+  .chat{overflow:visible}
+  .msgs{max-height:40vh}
+}
+.chip{display:inline-block;margin-left:6px;font-style:normal;font-family:var(--code);
+  font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;
+  border:1px solid;vertical-align:1px}
+.chip.built{color:#1E7A5A;border-color:#9FD9C3;background:#EAF7F2}
+.chip.partly{color:#8A5A12;border-color:#EBCF9C;background:#FBF3E4}
+.chip.design{color:#5B4B78;border-color:#CFC2E2;background:#F1ECF8}
+.legend{font-size:11.5px;color:var(--dim);margin:6px 0 0;line-height:1.5}
+.legend b{font-family:var(--body);font-weight:600;color:var(--text)}
