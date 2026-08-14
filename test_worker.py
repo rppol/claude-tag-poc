@@ -43,12 +43,20 @@ class FakeLLM:
         return self._text
 
 
-def fresh_db():
-    path = os.path.join(tempfile.mkdtemp(), "t.db")
+def fresh_db(path=None):
+    path = path or os.path.join(tempfile.mkdtemp(), "t.db")
     return db.connect(path)
 
 
-def test_claim_is_exclusive():
+def no_backoff():
+    """Requeues now carry an exponential delay; tests shouldn't sleep through it."""
+    db.BACKOFF_BASE = 0
+
+
+def test_claim_advances_through_the_queue():
+    """Renamed honestly: sequential claims on ONE connection show the queue
+    advances. They say nothing about exclusivity — see the two-connection test
+    below, which is what BEGIN IMMEDIATE actually has to survive."""
     conn = fresh_db()
     db.enqueue(conn, "e1", "C1", "111.0", "U1", "hi")
     db.enqueue(conn, "e2", "C1", "222.0", "U2", "yo")
@@ -77,6 +85,7 @@ def test_failure_requeues_then_gives_up():
     db.enqueue(conn, "e1", "C1", "111.0", "U1", "hi")
     slack = FakeSlack([{"user": "U1", "text": "hi"}])
     llm = FakeLLM(raises=RuntimeError("429 rate limited"))
+    no_backoff()
 
     for expected in ("queued", "queued", "failed"):
         assert worker.run_once(conn, slack, llm) is True
@@ -115,11 +124,6 @@ def test_end_to_end_with_fakes():
     assert "<@U1>: prod is 500ing" in sent, sent
     assert "<@U2>: <@BOT> what broke?" in sent, sent
     assert "Slack mrkdwn" in llm.calls[0]["system"], "system prompt did not reach the model"
-
-
-def test_only_free_models():
-    """The brief is free models only — a paid id would bill silently."""
-    assert worker.MODEL.endswith(":free"), worker.MODEL
 
 
 def test_empty_completion_is_an_error_not_an_empty_post():
@@ -195,6 +199,127 @@ def test_markdown_is_coerced_to_slack_mrkdwn():
     assert "### " not in out and "Next steps" in out, out
     # A lone asterisk pair that is already mrkdwn must survive untouched.
     assert worker.slackify("already *bold* here") == "already *bold* here"
+
+
+def test_claim_is_exclusive_under_contention():
+    """BEGIN IMMEDIATE is DESIGN.md's answer to 'why no lease manager'. The old
+    test made three sequential calls on one connection and passed with the
+    transaction removed, so the load-bearing decision had no coverage."""
+    import threading
+    path = os.path.join(tempfile.mkdtemp(), "contend.db")
+    seed = fresh_db(path)
+    for i in range(8):
+        db.enqueue(seed, f"e{i}", "C1", "1.0", "U", "x")
+
+    got, lock = [], threading.Lock()
+
+    def grab():
+        c = db.connect(path)
+        try:
+            for _ in range(6):
+                try:
+                    r = db.claim(c)
+                except Exception:
+                    continue          # a locked DB is transient, not fatal
+                if r is not None:
+                    with lock:
+                        got.append(r["id"])
+        finally:
+            c.close()
+
+    ts = [threading.Thread(target=grab) for _ in range(3)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert got, "no rows claimed at all"
+    assert len(got) == len(set(got)), f"a row was claimed twice: {sorted(got)}"
+    rows = seed.execute("SELECT attempts FROM runs WHERE status='running'").fetchall()
+    assert all(r["attempts"] == 1 for r in rows), [r["attempts"] for r in rows]
+
+
+def test_killed_worker_is_reclaimed_after_the_lease_expires():
+    """The failure the docstring used to claim was handled and wasn't: a SIGKILLed
+    worker never runs its except handler, so only a lease sweep recovers the run."""
+    conn = fresh_db()
+    db.enqueue(conn, "e_kill", "C1", "1.0", "U1", "x")
+    taken = db.claim(conn)
+    assert taken is not None
+    # process dies here — no finish, no fail
+    assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "running"
+    assert db.claim(conn) is None, "a live lease must not be stealable"
+
+    before = db.LEASE_SECONDS
+    db.LEASE_SECONDS = 0
+    try:
+        again = db.claim(conn)
+    finally:
+        db.LEASE_SECONDS = before
+    assert again is not None and again["id"] == taken["id"], again
+    assert conn.execute("SELECT attempts FROM runs").fetchone()["attempts"] == 2
+
+
+def test_a_posted_answer_is_never_posted_twice():
+    """If the post lands and finish() then fails, the retry must not repeat the
+    same answer into the channel."""
+    conn = fresh_db()
+    no_backoff()
+    db.enqueue(conn, "e_dup_post", "C1", "1.0", "U1", "x")
+    slack = FakeSlack([{"user": "U1", "text": "hi"}])
+    llm = FakeLLM(text="the answer")
+
+    row = db.claim(conn)
+    slack.chat_postMessage(channel="C1", thread_ts="1.0", text="the answer")
+    db.mark_posted(conn, row["id"])
+    db.fail(conn, row["id"], RuntimeError("died after posting"))
+
+    worker.run_once(conn, slack, llm)         # retry
+    assert len(slack.posted) == 1, slack.posted
+    assert conn.execute("SELECT status FROM runs").fetchone()["status"] == "done"
+
+
+def test_whitespace_completion_is_empty():
+    """'   \n  ' is as empty as None. The guard checked truthiness before
+    stripping, so a blank message posted and the run was marked done."""
+    import urllib.request
+
+    class R:
+        def __init__(self, p): self._p = json.dumps(p).encode()
+        def read(self, *a): return self._p
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    real = urllib.request.urlopen
+    for blank in ("   \n  ", "", "\t"):
+        urllib.request.urlopen = lambda req, timeout=None, b=blank: R(
+            {"model": "m:free", "choices": [{"message": {"content": b}}]})
+        try:
+            worker.OpenRouter(key="t").complete("s", "u")
+            raise AssertionError(f"{blank!r} should have raised")
+        except RuntimeError as e:
+            assert "empty completion" in str(e), str(e)
+        finally:
+            urllib.request.urlopen = real
+
+
+def test_slackify_leaves_code_alone():
+    """Observed: `ls **/*.py` became `ls */*.py` — silently wrong code posted
+    into an engineering channel."""
+    assert worker.slackify("Try `ls **/*.py` now") == "Try `ls **/*.py` now"
+    assert worker.slackify("Use `a**b` for power") == "Use `a**b` for power"
+    fenced = "```\n# install deps\npip install x\n```"
+    assert worker.slackify(fenced) == fenced, worker.slackify(fenced)
+    # #1234 is a ticket reference, not a heading.
+    assert worker.slackify("#1234 is the ticket") == "#1234 is the ticket"
+    # An odd number of asterisks must not leave ** behind (Slack renders it raw).
+    for s_ in ("use ** here.\n\n**Next steps**", "***bold***", "**a and **b**"):
+        assert "**" not in worker.slackify(s_), (s_, worker.slackify(s_))
+
+
+def test_every_model_in_the_list_is_free():
+    """Failover walks the whole list, so checking MODELS[0] alone would let a
+    paid id at MODELS[2] bill silently — the exact failure this guards."""
+    assert worker.MODELS, "model list is empty"
+    for m in worker.MODELS:
+        assert m.endswith(":free"), m
 
 
 if __name__ == "__main__":

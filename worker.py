@@ -80,13 +80,15 @@ class OpenRouter:
             raise RuntimeError(f"HTTP {e.code}: {e.read(400).decode(errors='replace')}")
         if "error" in d:
             raise RuntimeError(d["error"].get("message", "unknown error"))
-        text = (d.get("choices") or [{}])[0].get("message", {}).get("content")
+        # Strip first, then guard. A completion of "   \n  " is as empty as None
+        # and was slipping through, posting a blank message and marking it done.
+        text = ((d.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
         if not text:
             # A real failure mode, not paranoia: some free models return a null
             # completion. Raising here lets the attempts ceiling handle it instead
             # of posting an empty message into the thread.
             raise RuntimeError(f"empty completion from {d.get('model', self.model)}")
-        return text.strip()
+        return text
 
 
 class Failover:
@@ -113,16 +115,33 @@ class Failover:
         raise RuntimeError(f"every model failed; last: {last}")
 
 
-def slackify(text):
-    """Coerce markdown into Slack mrkdwn.
+# Fenced blocks and inline code are split out and passed through untouched.
+# Without this, `ls **/*.py` became `ls */*.py` and a shell comment inside a
+# fence lost its `#` — silently wrong code posted into an engineering channel.
+_CODE = re.compile(r"(```.*?```|`[^`\n]*`)", re.S)
 
-    The system prompt asks for mrkdwn and models still emit **bold** and ###
-    headers, which Slack renders literally. A formatting rule enforced only in a
-    prompt is not enforced — so enforce it here, once, for every model.
+
+def slackify(text):
+    """Coerce markdown into Slack mrkdwn, outside code only.
+
+    The system prompt asks for mrkdwn and models emit **bold** and ### headers
+    anyway, which Slack renders literally. A formatting rule that lives only in
+    a prompt is a request, not a constraint — so enforce it here, for every
+    model, present and future.
     """
-    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text, flags=re.S)   # **bold** -> *bold*
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)            # ### Heading -> Heading
-    return text.strip()
+    parts = _CODE.split(text)
+    for i in range(0, len(parts), 2):          # even indices are outside code
+        p = parts[i]
+        # No re.S: an unmatched ** must not pair with one three paragraphs later.
+        p = re.sub(r"\*\*(.+?)\*\*", r"*\1*", p)
+        # ponytail: a leftover odd ** collapses to *. Cost is `a ** b` in prose
+        # becoming `a * b`; inside backticks it is untouched, which is where
+        # exponentiation actually appears.
+        p = p.replace("**", "*")
+        # Require whitespace then content, so "#1234 is the ticket" survives.
+        p = re.sub(r"^#{1,6}[ \t]+(?=\S)", "", p, flags=re.M)
+        parts[i] = p
+    return "".join(parts).strip()
 
 
 def thread_transcript(slack, channel, thread_ts, limit=THREAD_LIMIT):
@@ -140,8 +159,17 @@ def run_once(conn, slack, llm):
     if row is None:
         return False
     try:
+        if row["posted_at"]:
+            # A previous attempt posted successfully and then failed on the way
+            # to finish(). Say it once, not three times.
+            db.finish(conn, row["id"], row["answer"])
+            return True
         text = slackify(llm.complete(SYSTEM, thread_transcript(slack, row["channel"], row["thread_ts"])))
+        if not text:
+            # slackify can empty a reply that was only markdown scaffolding.
+            raise RuntimeError("reply was empty after mrkdwn coercion")
         slack.chat_postMessage(channel=row["channel"], thread_ts=row["thread_ts"], text=text)
+        db.mark_posted(conn, row["id"])   # narrow the window to a single statement
         db.finish(conn, row["id"], text)
     except Exception as e:
         # Requeued for another attempt, or marked failed on the third strike.
@@ -161,8 +189,14 @@ def main():
     print("worker up — models: " + ", ".join(llm.models))
     while True:
         # ponytail: polling. Fine at this volume; LISTEN/NOTIFY when it isn't.
-        if not run_once(conn, slack, llm):
-            time.sleep(1)
+        try:
+            if not run_once(conn, slack, llm):
+                time.sleep(1)
+        except Exception as e:
+            # claim() runs before run_once's try, so a locked DB used to take the
+            # whole process down and stall the queue. Back off and keep serving.
+            print(f"worker loop error, backing off: {e}")
+            time.sleep(2)
 
 
 if __name__ == "__main__":

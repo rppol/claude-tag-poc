@@ -4,7 +4,9 @@
 
 A minimal reimplementation of [Claude Tag](https://www.anthropic.com/news/introducing-claude-tag)'s core loop: tag `@Claude` in a Slack thread, it reads the thread and answers in place.
 
-**[Open the simulator →](https://rppol.github.io/claude-tag-poc/)** — a chat workspace on one side, the multi-agent runtime that serves it on the other. Nine scenarios: fire a retry storm and watch three events collapse into one run, crash the worker and watch LangGraph resume from a checkpoint, ask across a channel boundary and watch the scope predicate refuse.
+**[Open the simulator →](https://rppol.github.io/claude-tag-poc/)** — a chat workspace on one side, the multi-agent runtime that serves it on the other. Nine scenarios: a retry storm collapsing three events into one run, a worker crash resuming from a LangGraph checkpoint, a cross-channel question refused by the scope predicate.
+
+**The simulator is a design artefact, not a mirror of this backend.** It shows the full multi-agent system — LangGraph, scoped memory, MCP, A2A, ambient. The backend in this repo implements the queue, the ack seam and one model call; the rest is designed and simulated, not built. `tools/run_scenarios.py` exercises only what exists.
 
 Two more tabs: **Architecture** (data flow, agent roster, memory boundary, MCP vs A2A, failure modes) and **Rollout plan** (capacity worked from stated assumptions for 100 engineers, Grafana / alert-channel / escalation integration, phasing, and a review pass that says where it breaks).
 
@@ -30,7 +32,7 @@ Slack ──▶ app.py       ack + one INSERT, returns in ~40ms
 python3 test_worker.py
 ```
 
-The tests drive the real code path with fake Slack and Claude clients, so the queue logic, retry dedupe, failure ceiling, and request shape are all verified without a network call.
+The tests drive the real code path with fake Slack and model clients: queue logic, dedupe, claim exclusivity under three concurrent workers, lease recovery after a killed worker, the attempt ceiling, duplicate-post prevention, and mrkdwn coercion — all without a network call. They do **not** assert the HTTP request shape; the fake replaces `urlopen` and discards the request object.
 
 ## Run it for real
 
@@ -96,9 +98,9 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 
 ## Status
 
-- Queue, dedupe, claim, retry ceiling, empty-completion guard — **verified by tests**, green in CI.
+- Queue, dedupe, claim exclusivity under contention, lease recovery, retry ceiling, backoff, duplicate-post prevention, empty-completion guard, mrkdwn coercion — **verified by 13 tests**, green in CI.
 - The simulator — **verified in a browser**: retry storm collapses 3 events to 1 run, crash requeues and resumes.
-- Live model round trip — **verified**. A real thread went to `nemotron-3-super-120b:free` and came back with an answer that cited a detail from a message *other* than the one that tagged the bot, which is the whole point of sending the transcript rather than the mention.
+- Live model round trip — **verified** via `poolside/laguna-s-2.1:free`. The reply cited `max_attempts`, `2.3.1` and `v2.3.1` — strings that appear only in Bob's messages, not in the one that tagged the bot. (An earlier version of this line credited `nemotron-3-super-120b:free`, which is now ranked third precisely because it leaks its reasoning into replies.)
 - Manufactured scenarios against the real backend with a live model — **7/7**
   (`tools/run_scenarios.py`). Five deterministic system checks plus two model
   checks: a usable answer that cites a detail from a message *other* than the
@@ -144,3 +146,26 @@ a real SQLite queue and a live free model, and labels each check:
 
 Memory, MCP and A2A are **not** exercised. They exist in the design and in the
 browser simulation, not in this backend.
+
+## What is verified, and how
+
+The runner and the test suite were themselves reviewed adversarially, and three
+checks were found to pass against broken behaviour — `no mention → no run` passed
+on an empty queue, the injection check passed when every model was down and
+nothing was posted, and the "cited the transcript" check passed against a stub
+that ignored the transcript entirely. All three are fixed.
+
+Each remaining check is now verified by breaking the behaviour it names and
+confirming it fails:
+
+| behaviour broken | check | result |
+|---|---|---|
+| `UNIQUE(event_id)` dropped | `sc_dedupe` | caught |
+| lease sweep removed | `sc_lease_recovery` | caught |
+| attempts ceiling removed | `sc_attempt_ceiling` | caught |
+| model ignores the transcript | `sc_answer` | caught |
+| total model outage | `sc_injection` | caught |
+| `BEGIN IMMEDIATE` removed | `sc_two_workers` | caught |
+
+A check that cannot fail is worse than no check: an untested area looks untested,
+while a falsely-verified one looks verified.

@@ -11,7 +11,7 @@ Four properties separate it from a chatbot, and none of them are about prompting
 3. **Ambient** — it can speak without being tagged.
 4. **Long-horizon** — it can schedule itself and work across hours or days.
 
-This POC builds pillar 4's foundation end to end and leaves the rest as marked debt.
+This POC builds the durable-queue foundation that pillar 4 needs — enqueue, lease, reclaim-after-crash, bounded retry — and leaves the rest as marked debt. It is not pillar 4: there is no scheduler and no work that spans hours.
 
 ## The constraint everything follows from
 
@@ -38,7 +38,7 @@ Climbing the laziness ladder, most of the architecture turned out to be things a
 | Would have built | What actually does it |
 |---|---|
 | Request signature verification, 3s ack, retry dedupe | **Bolt** — plus a `UNIQUE` column |
-| Lease manager with fencing tokens | **`BEGIN IMMEDIATE`** — one worker needs no lease protocol |
+| Fencing tokens, a lease service | **`BEGIN IMMEDIATE`** + one `claimed_at` column — the exclusivity and the crash recovery, without the machinery |
 | Event log + dispatcher | **One `runs` table** |
 | Public URL, ngrok, HMAC handling | **Socket Mode** — outbound connection, no ingress |
 
@@ -46,7 +46,7 @@ The architecture didn't disappear. It stopped being code we own.
 
 ## Decisions worth defending
 
-**SQLite, not Postgres.** No server to run. `BEGIN IMMEDIATE` holds the write lock across the select-and-update, so the claim is atomic. This is exactly correct for one worker and exactly wrong for two — a second worker would spend its life blocking. Marked at `db.py`.
+**SQLite, not Postgres.** No server to run. `BEGIN IMMEDIATE` holds the write lock across the select-and-update, so the claim is atomic — now covered by a test that runs three workers against one file and asserts no row is claimed twice. Under real contention a loser does not block politely; it raises `OperationalError` when the busy timeout expires, so the worker loop catches and backs off rather than dying. Correct for one worker, survivable for two, and Postgres with `SKIP LOCKED` when there are more. Marked at `db.py`.
 
 **Thread transcript, not just the mention.** `conversations_replies` gives Claude the room. Every line is prefixed with its Slack user id, because without attribution the model cannot tell who asked what in a thread where three people are talking.
 
@@ -68,7 +68,9 @@ is a request, not a constraint. `slackify()` coerces it for every model.
 
 **The model is not the interesting part.** Swapping Claude for a free Nemotron changed one function and no architecture. The queue, the ack seam, the dedupe, and the retry ceiling are all indifferent to what generates the text — which is the argument this whole repo is making.
 
-**Attempts ceiling.** A run that crashes deterministically would otherwise requeue forever. Three strikes, then `failed` with the error recorded.
+**Attempts ceiling, with backoff.** A run that fails deterministically would otherwise requeue forever. Three strikes, then `failed`, with the error recorded. The backoff matters as much as the ceiling: three attempts fired back-to-back in milliseconds turn a ten-second rate limit into a permanent failure.
+
+**A lease, because an except handler is not crash recovery.** `claim()` marks a row `running`; only an in-process exception ever put it back. A `SIGKILL` runs no handler, so the row sat in `running` forever and no worker looked at it again — the exact failure this file used to claim was handled. `claimed_at` plus a lease sweep in `claim()` is what actually recovers it.
 
 ## Debt, and when to pay it
 
