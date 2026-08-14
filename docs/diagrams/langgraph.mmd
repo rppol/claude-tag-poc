@@ -1,22 +1,21 @@
 flowchart TB
-  START(["START"]) --> ROUTER["router<br/><i>classify intent</i>"]
-  ROUTER -.->|"not_for_us"| END1(["END"])
-  ROUTER -->|"question / incident"| LIB["librarian<br/><i>scoped context</i>"]
-  LIB --> PLAN["planner<br/><i>decompose</i>"]
+  START(["mention arrives"]) --> Q[("queue<br/>claim · lease · 3 tries")]
+  Q --> ROUTER{"router<br/><small>worth working on?</small>"}
+  ROUTER -.->|"no"| DROP(["dropped"])
+  ROUTER -->|"yes"| LIB["librarian<br/><small>scoped context</small>"]
+  LIB --> PLAN["planner<br/><small>decompose</small>"]
 
-  PLAN -->|"needs_tools"| EXEC["executor<br/><i>MCP calls</i>"]
-  PLAN -->|"needs_specialist"| ANA["analyst<br/><i>A2A task</i>"]
-  PLAN -->|"answerable_now"| REV
+  PLAN --> EXEC["executor<br/><small>MCP tools</small>"]
+  PLAN --> ANA["analyst<br/><small>A2A task</small>"]
+  EXEC -.->|"write tool?<br/>interrupt()"| HUM{{"human approves"}}
+  HUM --> EXEC
 
-  EXEC -. "interrupt()<br/>await human approval" .-> HUM{{"human_gate"}}
-  HUM -->|"approved"| EXEC
-  HUM -->|"denied"| REV
-  EXEC --> REV["reviewer<br/><i>evidence check</i>"]
+  EXEC --> REV{"reviewer<br/><small>claims backed?</small>"}
   ANA --> REV
+  REV -->|"no · max 2"| PLAN
+  REV -->|"yes"| POST["post reply"] --> SCRIBE["scribe<br/><small>write memory</small>"] --> DONE(["done"])
 
-  REV -->|"revise · max 2"| PLAN
-  REV -->|"approved"| POST["post_reply"]
-  POST --> SCRIBE["scribe<br/><i>write memory</i>"]
-  SCRIBE --> END2(["END"])
-
-  CP[("checkpointer<br/>Postgres saver")] -. "state persisted<br/>after every node" .- PLAN
+  classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  class START,Q,POST,DONE,DROP built
+  class ROUTER,LIB,PLAN,EXEC,ANA,HUM,REV,SCRIBE design

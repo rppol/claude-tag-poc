@@ -1,24 +1,23 @@
 flowchart TB
-  subgraph SRC ["sources"]
-    AM["Alertmanager"] --> CH["#alerts-prod"]
-    SYN["synthetics"] --> CH
-    CH --> SEN["Sentinel<br/>watches, decides when to speak"]
+  subgraph IN["◈ what the agents can see"]
+    AL["#alerts-prod<br/><small>Alertmanager, synthetics</small>"]
+    TH["the thread<br/><small>who said what</small>"]
   end
 
-  subgraph POLICY ["one policy + credential layer"]
-    GATE{"allowlist · budget · always_ask"}
-    VAULT["credential vault<br/>injected at egress"]
-  end
+  IN --> GATE{"policy gate<br/><small>allowlist · budget · always-ask</small>"}
+  GATE --> VAULT["credential vault<br/><small>secret added at egress,<br/>never inside the sandbox</small>"]
 
-  SEN --> GATE
-  EXEC["Executor"] --> GATE
-  GATE --> VAULT
+  VAULT --> GR["Grafana<br/><small>dashboards · PromQL · panel image</small>"]
+  VAULT --> PD["PagerDuty<br/><small>oncall · escalation · MTTA</small>"]
+  VAULT --> GH["GitHub<br/><small>deploys · diffs · revert PR</small>"]
 
-  VAULT --> GRAF["Grafana<br/>dashboards, PromQL, panel render"]
-  VAULT --> PD["PagerDuty<br/>oncall, escalation policy, MTTA/MTTR"]
-  VAULT --> GH["GitHub<br/>deploys, PRs"]
+  GR & PD & GH --> OUT["answer in the thread"]
+  OUT --> AUD[("audit log<br/><small>every call, every actor</small>")]
 
-  GRAF --> OUT["answer in thread<br/>with panel snapshot"]
-  PD --> OUT
-  GH --> OUT
-  OUT --> AUD[("audit log<br/>every tool call, every actor")]
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  classDef ext stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  class GATE,VAULT,AUD design
+  class GR,PD,GH,AL ext
+  class TH,OUT built
+  style IN fill:#15111C,stroke:#2F2540,color:#9C8FB0

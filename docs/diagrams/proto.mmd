@@ -1,21 +1,26 @@
 flowchart TB
-  subgraph MCP ["MCP · reaching a tool you own"]
+%% the two halves stack; side by side they exceed the column
+  subgraph MCP["◈ MCP — calling a tool you own"]
     direction TB
-    EX["Executor"] --> POL{"policy gate<br/>allowlist + always_ask"}
-    POL -- "denied" --> DN["refused, logged"]
-    POL -- "ask" --> HU["human approves in thread"]
-    HU --> SRV["MCP server"]
-    POL -- "allow" --> SRV
-    SRV --> CRED["credential injected<br/>outside the sandbox"]
-    CRED --> API["Grafana · PagerDuty · GitHub"]
+    E["executor"] --> G{"policy gate<br/><small>allowlist · always-ask</small>"}
+    G -->|"denied"| X(["refused, logged"])
+    G -->|"needs a human"| H{{"approve in thread"}} --> S
+    G -->|"allowed"| S["MCP server"]
+    S --> C["credential added<br/><small>outside the sandbox</small>"] --> API["Grafana · PagerDuty · GitHub"]
+  end
+  MCP ~~~ A2A
+
+  subgraph A2A["◈ A2A — handing work to another agent"]
+    direction TB
+    P["planner"] --> CARD["read agent card<br/><small>skills · auth · endpoint</small>"]
+    CARD --> T["create task"] --> ST{"task state"}
+    ST --> W2["working"] --> ART["artifacts + citations"] --> P
+    ST --> F(["failed · rejected ·<br/>input-required"])
   end
 
-  subgraph A2A ["A2A · handing work to another agent"]
-    direction TB
-    PL["Planner"] --> CARD["fetch agent card<br/>skills, auth, endpoint"]
-    CARD --> TASK["create task"]
-    TASK --> ST{"task lifecycle"}
-    ST --> WK["working"] --> ART["artifacts + citations"]
-    ST --> FAIL["failed / rejected"]
-    ART --> PL
-  end
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  classDef ext stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  class E,G,X,H,S,C,P,CARD,T,ST,W2,ART,F design
+  class API ext
+  style MCP fill:#15111C,stroke:#2F2540,color:#9C8FB0
+  style A2A fill:#15111C,stroke:#2F2540,color:#9C8FB0

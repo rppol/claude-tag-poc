@@ -103,6 +103,13 @@
     </section>
 
     <section class="arch-sec">
+      <h2>How to read these diagrams</h2>
+      <p class="sec-note">Every diagram on this page uses the same three shapes, so what exists
+      and what is proposed can be told apart at a glance rather than from a caption.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/legend.svg" alt="Legend: a solid teal node means implemented and tested in the repo; a dashed violet node means designed only, drawn here but not built; an amber node means a service outside our boundary."></figure>
+    </section>
+
+    <section class="arch-sec">
       <h2>Data flow</h2>
       <p class="sec-note">One mention, end to end. Everything below <code>ack</code> happens after the platform has already been told <code>200 OK</code>.</p>
       <figure class="figure"><img class="diagram" src="diagrams/flow.svg" alt="Data flow: a mention enters the listener, is acked within 3 seconds and written to a queue, then a worker drives Router, Librarian, Planner, Executor, Reviewer and Scribe before posting back to the thread."></figure>

@@ -1,34 +1,18 @@
 sequenceDiagram
   autonumber
   participant H as Human
-  participant L as Listener
-  participant W as Worker
-  participant R as Router
-  participant B as Librarian
+  participant Q as Queue
   participant P as Planner
-  participant E as Executor
-  participant A as Analyst (A2A)
+  participant T as Tools
   participant V as Reviewer
-  participant S as Scribe
 
-  H->>L: app_mention
-  L-->>H: 200 OK (~40ms)
-  L->>W: enqueue run
-  W->>R: classify
-  R->>B: route: incident question
-  B->>B: thread + memory, scoped by channel binding
-  B->>P: context bundle
-  par tools
-    P->>E: query Grafana, list incidents
-    E-->>P: metrics + oncall
-  and specialist
-    P->>A: task: correlate with last 30d postmortems
-    A-->>P: findings + citations
-  end
+  H->>Q: @Claude, what broke?
+  Q-->>H: 200 OK · ~40ms
+  Note over Q: everything below<br/>is past the deadline
+  Q->>P: thread + scoped memory
+  P->>T: metrics, oncall, past incidents
+  T-->>P: 41/s 5xx · @priya
   P->>V: draft answer
-  V--xP: unsupported claim, revise
+  V--xP: one claim has no evidence
   P->>V: revised draft
-  V-->>W: approved
-  W-->>H: reply in thread
-  W->>S: run transcript
-  S->>S: dedupe, then write 2 memories
+  V-->>H: reply in thread

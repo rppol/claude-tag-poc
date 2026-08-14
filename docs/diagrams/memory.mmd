@@ -1,11 +1,16 @@
-flowchart LR
-  EV["inbound event<br/>channel = C_INCIDENTS"] --> BIND["channel_binding<br/>lookup"]
-  BIND --> SCOPE["identity scope<br/>eng-claude"]
-  REQ["request body<br/>attacker-controlled"] -. "never used for scope" .-> BIND
+flowchart TB
+  EV["event arrives<br/><small>channel = #incidents</small>"] --> BIND["channel binding"]
+  BIND --> SCOPE["scope = eng-claude"]
+  BODY["message text<br/><small>anyone in the channel<br/>can write this</small>"] -.->|"never sets scope"| BIND
 
-  SCOPE --> Q["vector query<br/>WHERE scope_id = :identity<br/>AND ... then rank"]
-  TXT["question text"] --> EMB["embedding"] --> Q
-  Q --> VS[("vector store<br/>Qdrant via mem0")]
-  VS --> TOPK["top-k in scope"] --> CTX["context bundle"]
+  SCOPE --> Q["<b>one query</b><br/>filter by scope, <i>then</i> rank"]
+  ASK["the question"] --> EMB["embedding"] --> Q
+  Q --> VS[("vector store")]
+  VS --> HITS["only in-scope hits"] --> CTX["context for the model"]
 
-  OTHER[("#sales memories<br/>different scope")] -. "not reachable:<br/>excluded in the predicate,<br/>not filtered after" .-x Q
+  SALES[("#sales memories")] -.->|"excluded by the filter,<br/>not removed afterwards"| Q
+
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  classDef danger stroke:#DB6A50,fill:#33201B,color:#F0C9BE
+  class EV,BIND,SCOPE,Q,ASK,EMB,VS,HITS,CTX design
+  class BODY,SALES danger

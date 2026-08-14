@@ -1,22 +1,23 @@
 flowchart TB
-  U["@Claude mentioned in #incidents"] --> L["Listener · Bolt over Socket Mode"]
-  L -- "200 OK in ~40ms" --> P["Chat platform"]
-  P -. "retries same event_id if unacked" .-> L
-  L --> Q[("runs queue · UNIQUE event_id<br/>absorbs the retry storm")]
-
-  subgraph AFTER ["everything past here is asynchronous"]
-    direction TB
-    Q --> W["Worker · claim, lease, 3-attempt ceiling"]
-    W --> R{"Router<br/>is this worth work?"}
-    R -- "no" --> D["dropped, logged"]
-    R -- "yes" --> LB["Librarian<br/>scoped context"]
-    LB --> PL["Planner"]
-    PL --> EX["Executor · MCP tools"]
-    PL --> AN["Analyst · A2A task"]
-    EX --> RV{"Reviewer<br/>claims backed by evidence?"}
-    AN --> RV
-    RV -- "rejected" --> PL
-    RV -- "approved" --> OUT["post into the thread"]
-    OUT --> SC["Scribe"]
-    SC --> MEM[("memory · scoped to identity")]
+  subgraph FAST["◈ inside Slack's 3-second deadline"]
+    direction LR
+    U["@Claude<br/>mentioned"] --> L["listener<br/><small>ack + 1 insert</small>"]
+    L --> Q[("runs<br/>unique event_id")]
   end
+
+  L -->|"200 OK · ~40ms"| SL["Slack"]
+  SL -.->|"no ack? retry<br/>same event_id"| L
+
+  subgraph SLOW["◈ after the ack — no deadline, so this can be slow"]
+    direction LR
+    Q --> W["worker<br/><small>claim · lease · retry</small>"] --> AG["agents"] --> R["reply<br/>in thread"]
+  end
+
+  classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  classDef ext stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  class U,L,Q,W,R built
+  class SL ext
+  class AG design
+  style FAST fill:#15111C,stroke:#2F2540,color:#9C8FB0
+  style SLOW fill:#15111C,stroke:#2F2540,color:#9C8FB0

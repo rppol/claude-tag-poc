@@ -1,10 +1,18 @@
-flowchart LR
-  P1["Phase 1 · shadow<br/>1 channel, 6 people<br/>read-only tools"] --> D1{"answers useful<br/>without a human rewriting?"}
-  D1 -- no --> P1
-  D1 -- yes --> P2["Phase 2 · assisted<br/>3 channels, 25 people<br/>memory on, always_ask writes"]
-  P2 --> D2{"scope isolation holds<br/>under a red-team pass?"}
-  D2 -- no --> FIX["fix predicate, re-test"] --> D2
-  D2 -- yes --> P3["Phase 3 · org<br/>all 100, ambient off"]
-  P3 --> D3{"noise complaints<br/>under threshold?"}
-  D3 -- no --> TUNE["raise gate, cut rate"] --> D3
-  D3 -- yes --> P4["Phase 4 · ambient<br/>opt-in per channel"]
+flowchart TB
+  P1["<b>1 · Shadow</b><br/>1 channel · 6 people<br/>read-only, no memory"]
+  P2["<b>2 · Assisted</b><br/>3 channels · 25 people<br/>memory on, writes ask first"]
+  P3["<b>3 · Org-wide</b><br/>all 100 · ambient off"]
+  P4["<b>4 · Ambient</b><br/>opt-in per channel"]
+
+  P1 --> D1{"useful without<br/>a human rewriting it?"}
+  D1 -->|"no"| P1
+  D1 -->|"yes"| P2 --> D2{"scope holds under<br/>a red-team pass?"}
+  D2 -->|"no"| FIX["fix the predicate"] --> D2
+  D2 -->|"yes"| P3 --> D3{"spend predictable?<br/>no scope incident?"}
+  D3 -->|"no"| TUNE["tighten budgets"] --> D3
+  D3 -->|"yes"| P4
+
+  classDef ph stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  classDef gate stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  class P1,P2,P3,P4 ph
+  class D1,D2,D3,FIX,TUNE gate
