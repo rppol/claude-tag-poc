@@ -1,8 +1,26 @@
 # claude-tag-poc
 
+![test](https://github.com/rppol/claude-tag-poc/actions/workflows/test.yml/badge.svg)
+
 A minimal reimplementation of [Claude Tag](https://www.anthropic.com/news/introducing-claude-tag)'s core loop: tag `@Claude` in a Slack thread, it reads the thread and answers in place.
 
-Backend only so far. See [DESIGN.md](./DESIGN.md) for why it's shaped this way and what was deliberately left out.
+**[Open the simulator →](https://rppol.github.io/claude-tag-poc/)** — a Slack channel on one side, the queue that serves it on the other. Fire a retry storm and watch three Slack events collapse into one run; crash the worker and watch the run survive it.
+
+See [DESIGN.md](./DESIGN.md) for why it's shaped this way and what was deliberately left out.
+
+## The one constraint
+
+Slack's Events API wants HTTP 200 within **3 seconds** and retries with the *same* `event_id` when it doesn't get one — so a slow handler produces duplicate work, not just a timeout. Everything here follows from splitting at that seam:
+
+```
+Slack ──▶ app.py       ack + one INSERT, returns in ~40ms
+             │
+             ▼
+          runs table   queued │ running │ done │ failed
+             │
+             ▼
+          worker.py    claim → read thread → Claude → post back
+```
 
 ## Run the checks (no dependencies, no credentials)
 
@@ -47,9 +65,17 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 | `worker.py` | Claims a run, reads the thread, calls Claude, posts back. |
 | `db.py` | SQLite queue: enqueue, claim, finish, fail. |
 | `schema.sql` | One table. |
-| `test_worker.py` | Runnable checks. |
+| `test_worker.py` | Runnable checks, run in CI on every push. |
+| `docs/index.html` | The simulator. Static, no build step, no key. |
 
 ## Status
 
-- Queue, dedupe, claim, retry ceiling, and request shape — **verified by tests**.
-- Live Slack + Anthropic round trip — **not yet run**; it needs credentials that weren't available when this was written.
+- Queue, dedupe, claim, retry ceiling, and request shape — **verified by tests**, green in CI.
+- The simulator — **verified in a browser**: retry storm collapses 3 events to 1 run, crash requeues and resumes.
+- Live Slack + Anthropic round trip — **not yet run**. It needs credentials that weren't available when this was written.
+
+## Why the simulator is scripted
+
+It runs no model and holds no key. Calling the Anthropic API from a public page would mean shipping the key in client-side JS, where anyone can read it — Anthropic gates that behind a header named `anthropic-dangerous-direct-browser-access`, and the name is the warning.
+
+The trade is a good one: "an LLM returns text" isn't the interesting part of Claude Tag. The state machine is — the ack seam, the dedupe, the claim, the requeue — and that's what the page actually runs.
