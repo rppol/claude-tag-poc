@@ -9,6 +9,7 @@ whole integration is one POST and needs no SDK. Only free models are used.
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -17,11 +18,23 @@ import db
 
 API = "https://openrouter.ai/api/v1/chat/completions"
 
-# Pinned deliberately. OpenRouter's `openrouter/free` auto-router is tempting and
-# is a trap: it can route to a special-purpose model (a content-safety classifier
-# in testing) that returns no content at all. Override with OPENROUTER_MODEL.
-# Verified working alternative: google/gemma-4-31b-it:free
-MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
+# Preference order, not a single pin. Free models 429 constantly — 2 of 6 were
+# already rate-limited on a cold probe — so the worker fails over rather than
+# burning an attempt from the retry ceiling on a transient limit.
+#
+# Order is by measured behaviour, not parameter count: laguna answers a real
+# thread in ~6s, while nemotron-120b took 12s and leaked its reasoning into the
+# reply, which in a Slack thread reads as the bot talking to itself.
+#
+# Not `openrouter/free`: that auto-router sent a chat request to a content-safety
+# classifier, which returned no content at all.
+MODELS = [
+    "poolside/laguna-s-2.1:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
+]
+MODEL = os.environ.get("OPENROUTER_MODEL", MODELS[0])
 MAX_TOKENS = 800
 THREAD_LIMIT = 50
 
@@ -76,6 +89,42 @@ class OpenRouter:
         return text.strip()
 
 
+class Failover:
+    """Tries each free model in turn. A 429, an empty completion and a transport
+    error are the three ways a free model fails, and all three are transient for
+    *this* model rather than terminal for the run — so move on instead of
+    spending one of the run's three attempts."""
+
+    def __init__(self, models=None):
+        self.models = list(models or ([MODEL] if os.environ.get("OPENROUTER_MODEL") else MODELS))
+        self.used = None
+        self.skipped = []
+
+    def complete(self, system, user):
+        last = None
+        for m in self.models:
+            try:
+                out = OpenRouter(model=m).complete(system, user)
+                self.used = m
+                return out
+            except Exception as e:
+                self.skipped.append((m, str(e)[:80]))
+                last = e
+        raise RuntimeError(f"every model failed; last: {last}")
+
+
+def slackify(text):
+    """Coerce markdown into Slack mrkdwn.
+
+    The system prompt asks for mrkdwn and models still emit **bold** and ###
+    headers, which Slack renders literally. A formatting rule enforced only in a
+    prompt is not enforced — so enforce it here, once, for every model.
+    """
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text, flags=re.S)   # **bold** -> *bold*
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)            # ### Heading -> Heading
+    return text.strip()
+
+
 def thread_transcript(slack, channel, thread_ts, limit=THREAD_LIMIT):
     """The room, not just the mention. Attribution matters — without the user id
     prefix the model cannot tell who asked what in a multi-person thread."""
@@ -91,7 +140,7 @@ def run_once(conn, slack, llm):
     if row is None:
         return False
     try:
-        text = llm.complete(SYSTEM, thread_transcript(slack, row["channel"], row["thread_ts"]))
+        text = slackify(llm.complete(SYSTEM, thread_transcript(slack, row["channel"], row["thread_ts"])))
         slack.chat_postMessage(channel=row["channel"], thread_ts=row["thread_ts"], text=text)
         db.finish(conn, row["id"], text)
     except Exception as e:
@@ -108,8 +157,8 @@ def main():
 
     conn = db.connect()
     slack = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    llm = OpenRouter()
-    print(f"worker up — model {llm.model}")
+    llm = Failover()
+    print("worker up — models: " + ", ".join(llm.models))
     while True:
         # ponytail: polling. Fine at this volume; LISTEN/NOTIFY when it isn't.
         if not run_once(conn, slack, llm):

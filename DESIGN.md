@@ -52,7 +52,17 @@ The architecture didn't disappear. It stopped being code we own.
 
 **No LLM SDK.** OpenRouter is OpenAI-compatible, so the model call is one POST. `urllib` from the standard library does it in about twenty lines, which is smaller than the import statement's worth of dependency. `requirements.txt` has one entry, and it's Slack's.
 
-**A pinned free model, not the auto-router.** `openrouter/free` looks like the lazy answer and isn't: it routed a plain chat request to `nemotron-3.5-content-safety:free`, a classifier, which returned `content: null`. The default is pinned to `nemotron-3-super-120b-a12b:free` and overridable by env var.
+**Failover across free models, not retry on one.** A 429 is transient for *that
+model* and terminal for nothing. Spending one of the run's three attempts on it
+is the wrong trade, so the worker walks a preference list instead. Two of six
+free models were rate-limited on a cold probe — this is the common path.
+
+**Formatting is enforced in code, not in the prompt.** A model emitted
+`**bold**`, which Slack renders literally, despite a system prompt asking for
+mrkdwn. Same principle as the tool allowlist: a rule that lives only in a prompt
+is a request, not a constraint. `slackify()` coerces it for every model.
+
+**A chosen list, not the auto-router.** `openrouter/free` looks like the lazy answer and isn't: it routed a plain chat request to `nemotron-3.5-content-safety:free`, a classifier, which returned `content: null`. The list is ordered by measured behaviour — `laguna-s-2.1` answers a real thread in ~4s, while `nemotron-3-super-120b` took 12s and leaked its reasoning into the reply — and `OPENROUTER_MODEL` overrides the whole thing.
 
 **An empty completion is an error.** That `content: null` is the reason `complete()` raises instead of returning. Without the guard the worker posts a blank message into the thread and marks the run `done` — a silent failure that looks like success. A test pins the behaviour.
 

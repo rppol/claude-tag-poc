@@ -147,6 +147,56 @@ def test_empty_completion_is_an_error_not_an_empty_post():
         urllib.request.urlopen = real
 
 
+def test_failover_skips_a_rate_limited_model():
+    """Two of six free models were 429 on a cold probe, so this is the median
+    case, not an edge case. A 429 must cost a model, not one of the run's three
+    attempts."""
+    calls = []
+
+    class FakeOR:
+        def __init__(self, key=None, model=None):
+            self.model = model
+        def complete(self, system, user):
+            calls.append(self.model)
+            if self.model == "a:free":
+                raise RuntimeError("HTTP 429: rate limited")
+            if self.model == "b:free":
+                raise RuntimeError("empty completion from b:free")
+            return "answered by " + self.model
+
+    real = worker.OpenRouter
+    worker.OpenRouter = FakeOR
+    try:
+        f = worker.Failover(models=["a:free", "b:free", "c:free"])
+        out = f.complete("sys", "user")
+        assert out == "answered by c:free", out
+        assert f.used == "c:free", f.used
+        assert calls == ["a:free", "b:free", "c:free"], calls
+        assert len(f.skipped) == 2, f.skipped
+
+        # All models down is terminal — the run must fail, not hang or return "".
+        f2 = worker.Failover(models=["a:free"])
+        try:
+            f2.complete("s", "u")
+            raise AssertionError("expected an error when every model fails")
+        except RuntimeError as e:
+            assert "every model failed" in str(e), str(e)
+    finally:
+        worker.OpenRouter = real
+
+
+def test_markdown_is_coerced_to_slack_mrkdwn():
+    """Observed live: a free model emitted **bold** and Slack renders that
+    literally. The prompt asks for mrkdwn; the prompt is not an enforcement
+    mechanism."""
+    out = worker.slackify("Check the **retry config**.\n### Next steps\nRevert **v2.3.1**.")
+    assert "**" not in out, out
+    assert "*retry config*" in out, out
+    assert "### " not in out and "Next steps" in out, out
+    # A lone asterisk pair that is already mrkdwn must survive untouched.
+    assert worker.slackify("already *bold* here") == "already *bold* here"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

@@ -51,11 +51,17 @@ python3 worker.py  # terminal 2 — does the work
 
 Then invite the bot to a channel and `@mention` it.
 
-**Model.** Defaults to `nvidia/nemotron-3-super-120b-a12b:free` — free tier only.
-Override with `OPENROUTER_MODEL`; `google/gemma-4-31b-it:free` also works. Don't
-reach for OpenRouter's `openrouter/free` auto-router: it can route to a
-special-purpose model (a content-safety classifier, in testing) that returns no
-content at all.
+**Models.** Free tier only, and a preference list rather than a single pin —
+the worker fails over on a 429, an empty completion, or a transport error. On a
+cold probe of six free models, two were already rate-limited and one returned a
+null completion, so failover is the median case rather than an edge case.
+
+Order is by measured behaviour, not size: `poolside/laguna-s-2.1:free` answers a
+real thread in ~4s, while `nemotron-3-super-120b:free` took 12s and leaked its
+reasoning into the reply. Override the whole list with `OPENROUTER_MODEL`.
+
+Don't reach for OpenRouter's `openrouter/free` auto-router: it routed a chat
+request to a content-safety classifier, which returned no content at all.
 
 **On macOS**, if you get `CERTIFICATE_VERIFY_FAILED`, your Python has no CA
 bundle. Either run `Install Certificates.command` from your Python's Applications
@@ -84,6 +90,7 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 | `db.py` | SQLite queue: enqueue, claim, finish, fail. |
 | `schema.sql` | One table. |
 | `test_worker.py` | Runnable checks, run in CI on every push. |
+| `tools/run_scenarios.py` | Drives the real backend through manufactured threads with a live model. |
 | `docs/` | Simulator source: `index.html`, `style.css`, `sim.js`, `diagrams/*.mmd`. |
 | `tools/build.sh` | The build. Renders mermaid to SVG, self-hosts fonts, assembles `_site/`. |
 
@@ -92,6 +99,10 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 - Queue, dedupe, claim, retry ceiling, empty-completion guard — **verified by tests**, green in CI.
 - The simulator — **verified in a browser**: retry storm collapses 3 events to 1 run, crash requeues and resumes.
 - Live model round trip — **verified**. A real thread went to `nemotron-3-super-120b:free` and came back with an answer that cited a detail from a message *other* than the one that tagged the bot, which is the whole point of sending the transcript rather than the mention.
+- Manufactured scenarios against the real backend with a live model — **7/7**
+  (`tools/run_scenarios.py`). Five deterministic system checks plus two model
+  checks: a usable answer that cites a detail from a message *other* than the
+  mention, and a declined prompt-injection attempt.
 - Live Slack round trip — **not yet run**; needs a workspace and a bot token.
 
 ## Why the simulator is scripted
@@ -116,3 +127,20 @@ tools/build.sh
 
 Run it locally with `./tools/build.sh`, then serve `_site/`. GitHub Pages deploys the
 same artifact from `.github/workflows/ci.yml`.
+
+## Running the scenarios
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-... python3 tools/run_scenarios.py
+```
+
+This is not the browser simulation. It drives `db` and `worker.run_once` against
+a real SQLite queue and a live free model, and labels each check:
+
+- **SYSTEM** — dedupe, no-mention, crash/resume, attempt ceiling, interleave.
+  Deterministic. A failure here is a bug.
+- **MODEL** — answer usability and injection refusal. Non-deterministic; judge
+  these, don't assert on them.
+
+Memory, MCP and A2A are **not** exercised. They exist in the design and in the
+browser simulation, not in this backend.
