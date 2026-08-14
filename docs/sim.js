@@ -352,11 +352,11 @@ function renderChannels(){
 const AGENTS = [
   {n:"Router",     c:"#A683D6", m:"small", goal:"Decide whether this event deserves work at all, and which path owns it. The cheapest model in the graph, because it runs on everything.", i:"platform event", o:"route | drop"},
   {n:"Librarian",  c:"#4FD8AA", m:"small", goal:"Assemble the minimum sufficient context, and enforce the scope boundary while doing it. Owns the only code path that reads memory.", i:"route", o:"context bundle"},
-  {n:"Planner",    c:"#EDAE55", m:"large", goal:"Turn a request into an ordered set of steps, and decide what needs a tool, a specialist, or nothing at all.", i:"context bundle", o:"plan"},
-  {n:"Executor",   c:"#EDAE55", m:"small", goal:"Run tool calls through MCP under policy. Never holds a credential; never decides whether a call is allowed.", i:"plan", o:"tool results"},
+  {n:"Agent",      c:"#EDAE55", m:"large", goal:"Decide what to do next and do it, one tool call at a time, adapting to what each result shows. Planning and executing were separate nodes until it became clear that is the model's own loop, hand-rolled with worse adaptivity.", i:"context bundle", o:"tool results"},
+  {n:"Writer",     c:"#4FD8AA", m:"large", goal:"Decide what the humans actually read. This was unnamed and unowned — the single most consequential decision in the system was smuggled into whichever node got implemented last.", i:"tool results", o:"draft"},
   {n:"Analyst",    c:"#DB6A50", m:"external", goal:"Own a domain the core system does not. Reached over A2A as a task with its own lifecycle, not called as a function.", i:"A2A task", o:"artifacts + citations"},
   {n:"Human gate", c:"#EDAE55", m:"—", goal:"Hold the graph open while a person decides. Implemented as a LangGraph interrupt, so the pause is a checkpoint rather than a blocked thread.", i:"interrupt", o:"approve | deny"},
-  {n:"Reviewer",   c:"#4FD8AA", m:"large", goal:"Refuse to let an unsupported claim reach the channel. Checks each assertion against a tool result or citation, and sends the draft back if it can't.", i:"draft", o:"approve | revise"},
+  {n:"Verifier",   c:"#4FD8AA", m:"none", goal:"Refuse to let an unsupported claim reach the channel — mechanically. Every number, timestamp, version, service name and @-identity in the draft must appear verbatim in a tool result or the transcript. Zero tokens, deterministic, and it cannot be argued out of its verdict. A second large model reading the same context would inherit the first one's misreadings.", i:"draft", o:"approve | back to writer"},
   {n:"Scribe",     c:"#4FD8AA", m:"small", goal:"Decide what from this run is worth remembering, dedupe it against what is already known, and write it scoped to the identity.", i:"run transcript", o:"memories"},
   {n:"Sentinel",   c:"#A683D6", m:"small", goal:"Decide when to speak without being asked — and, far more often, when not to. Runs outside the request path.", i:"channel stream", o:"ambient post | silence"},
 ];
@@ -372,7 +372,7 @@ const PROTO = [
 
 const STACK = [
   ["Ingress","Bolt · Socket Mode","No public URL, no signature handling, and the 3-second ack is the SDK's problem rather than yours."],
-  ["Queue","Postgres · SKIP LOCKED","One table and a lease. The audit log is the same rows, so observability is free."],
+  ["Queue","Postgres · SKIP LOCKED","One table and a lease. Rows are mutated in place — attempt 1's error is overwritten by attempt 2 — so this is state, not an audit log. Append a separate attempts table if audit is wanted."],
   ["Orchestration","LangGraph","Conditional edges, a checkpointer and interrupt() — the three things a hand-rolled loop reinvents badly."],
   ["Tracing","LangSmith","Per-node spans with tokens and latency. Without it, debugging a multi-agent run is archaeology."],
   ["Memory","mem0","Extraction and dedupe already solved; decay is ours to add. Scope is the one thing you must not delegate."],
@@ -388,6 +388,11 @@ const FAILS = [
   ["Memory crosses a channel","Scope in the query predicate, derived from the channel binding — <i>designed; no memory layer exists yet, so there is nothing to test</i>."],
   ["Prompt injection from a channel","Treated as content, never as instruction. The real boundary is the tool allowlist, which the model cannot edit."],
   ["Ambient becomes noise","Asymmetric thresholds, a daily budget, and reaction feedback. One bad interruption costs more than ten missed ones."],
+  ["Two workers post the same answer","The lease must exceed the worst-case run, and the right to post is reserved with an atomic UPDATE fenced on the attempt count. A worker whose lease lapsed holds a stale token and cannot post."],
+  ["One channel floods the queue","One run in flight per channel. FIFO is not fair when a single alert channel can put 200 rows ahead of everyone."],
+  ["A run dies after three tries","It says so in the thread. Silence leaves the person who asked waiting for an answer that is never coming."],
+  ["A forged turn in the transcript","Message bodies are flattened before formatting. Attribution lives in the line structure, so a newline used to manufacture a turn from someone who never spoke."],
+  ["Memory poisoned by a channel member","Nothing is written that a tool did not assert or a human did not confirm. Decay cannot fix a fact that was wrong on the day it was written."],
   ["A tool returns nothing","Empty completions and empty tool results raise rather than post. A blank message that reads as success is the worst outcome."],
   ["Runaway spend","Per-identity daily budget, enforced before the call. Traced per node so the expensive one is identifiable."],
 ];
@@ -398,12 +403,17 @@ const CAP = [
   ["Mentions per active user per day","6","Assumption. The number most worth challenging."],
   ["Runs per day","~240","40 × 6. Ambient adds ~12."],
   ["Peak hour share","18%","~43 runs/hr, so roughly 0.7/min."],
-  ["p95 run duration","38s","Dominated by tool calls, not by the model."],
-  ["Concurrent runs at peak","~0.45","0.7/min × 38s ÷ 60. One worker carries the load."],
-  ["Workers to deploy","2","Load needs one. The second exists so a rolling restart is not an outage."],
-  ["LLM tokens per day","~2.9M in / 0.3M out","240 runs × ~12k in. Caching the stable prefix is most of the win."],
+  ["p95 <i>service</i> time","38s","Time to produce an answer once a worker starts. Not what a user waits."],
+  ["p95 <i>response</i> time","106s / 48s","What the user actually waits: 1 worker / 2 workers. M/D/c at 0.72/min, S=38s. Queue wait was never derived, and it is 2.8x the service figure at one worker."],
+  ["Concurrent runs at peak","~0.45","0.7/min × 38s ÷ 60. Utilisation, not latency — see response time above."],
+  ["Runs/min one worker absorbs<br>before p95 doubles","~0.8","ρ≈0.5. The row that makes every other row actionable."],
+  ["Workers to deploy","2 (3 at Phase 3)","Load needs one at 240/day. Phase 3 is all 100 people ≈ 600 runs/day, ρ=1.14 on one worker — unstable. Two for load, a third so a rolling restart is not a degradation."],
+  ["LLM tokens per day","~2.9M in / ~0.2M out","240 × ~12k in; out is bounded by MAX_TOKENS=800, so 0.3M contradicted the code."],
+  ["Ambient triage tokens/day","~1-2M","Triage cost scales with <i>messages</i> seen, not answers posted — plausibly the largest line here, and it was missing entirely."],
+  ["Prompt cache saving","per-thread, not per-prefix","The stable system prefix is ~1.2% of a request. The reuse that pays is within a run and across follow-ups in the same thread."],
   ["Vectors written per day","~480","2 memories per run. Under 200k in a year — Qdrant is not the constraint."],
-  ["Postgres","< 1 GB / year","Runs plus audit rows. The bottleneck is nowhere near here."],
+  ["Postgres · runs","< 1 GB / year","Runs plus audit rows. Not the bottleneck."],
+  ["Postgres · graph checkpoints","~25 GB / year","A checkpointer serialises full state per node per run. The largest writer in the stack, and it was absent from this table."],
 ];
 
 const INTEG = [
@@ -423,9 +433,10 @@ const INTEG = [
 
 const PHASES = [
   {k:"Phase 1 · 2 weeks", n:"Shadow", p:"One channel, six volunteers, read-only tools. Memory off. Every answer is judged by whether a human had to rewrite it.", g:"Gate: useful without editing, in the majority of runs."},
+  {k:"Infra · alongside", n:"The stack the phases assume", p:"Postgres before a second worker (Phase 2). Tracing before \"traces sampled weekly\" (Phase 3). Every phase below gates on a product outcome and silently assumes this track already happened.", g:"Gate: each phase blocked until its infrastructure exists."},
   {k:"Phase 2 · 3 weeks", n:"Assisted", p:"Three channels, 25 people. Memory on. Write tools behind always_ask. Red-team the scope boundary deliberately.", g:"Gate: isolation holds under an attempt to break it."},
   {k:"Phase 3 · 4 weeks", n:"Org-wide", p:"All 100. Ambient still off. Budgets and per-identity allowlists enforced. Traces sampled and reviewed weekly.", g:"Gate: spend predictable, no scope incident."},
-  {k:"Phase 4 · ongoing", n:"Ambient", p:"Opt-in per channel, starting with #incidents. Reaction feedback tunes the threshold per channel.", g:"Gate: mute rate stays below the agreed line."},
+  {k:"Phase 4 · ongoing", n:"Ambient", p:"Opt-in per channel — starting with a low-traffic one, <i>not</i> #alerts-prod, which the integration notes rule out. Replies, mutes and thread resolution are the signal; a 👍 is not.", g:"Gate: mute rate stays below the agreed line."},
 ];
 
 const REVIEW = [

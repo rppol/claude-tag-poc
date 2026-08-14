@@ -160,8 +160,11 @@ def sc_attempt_ceiling(llm):
     for _ in range(4):
         worker.run_once(c, s, Dead())
         seen.append(c.execute("SELECT status FROM runs").fetchone()["status"])
-    ok = seen == ["queued", "queued", "failed", "failed"] and not s.posted
-    return line("3 strikes → failed", "SYSTEM", ok, "→".join(seen))
+    # One message is posted when it gives up — silence in a public thread
+    # leaves the person who asked waiting forever. No ANSWER is posted.
+    ok = seen == ["queued", "queued", "failed", "failed"] and len(s.posted) == 1
+    return line("3 strikes → failed, and says so", "SYSTEM", ok,
+                "→".join(seen) + f" · told-user={len(s.posted)}")
 
 
 def sc_two_workers(llm):
@@ -171,8 +174,10 @@ def sc_two_workers(llm):
     import threading
     path = os.path.join(tempfile.mkdtemp(), "contend.db")
     c = db.connect(path)
+    # One channel each: same-channel runs are serialised on purpose now, so
+    # a flooding channel cannot occupy every worker.
     for i in range(6):
-        db.enqueue(c, f"e_c{i}", "C1", "1.0", "U", "x")
+        db.enqueue(c, f"e_c{i}", f"C{i}", "1.0", "U", "x")
 
     got, errs = [], []
     lock = threading.Lock()

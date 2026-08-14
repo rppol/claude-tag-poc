@@ -123,8 +123,8 @@
 
     <section class="arch-sec">
       <h2>Orchestration is a graph, not a script</h2>
-      <p class="sec-note">LangGraph gives the three things a hand-rolled loop always ends up reinventing badly: conditional edges, a checkpointer, and <code>interrupt()</code>. The crash-and-resume behaviour is the checkpointer. The tool-approval gate is an interrupt. Neither is bespoke machinery here.</p>
-      <figure class="figure"><img class="diagram" src="diagrams/langgraph.svg" alt="LangGraph state graph: START to router, which conditionally routes to END or librarian, then planner, which fans out to executor or analyst or straight to reviewer. Executor can interrupt for a human gate. Reviewer loops back to planner to revise, or forwards to post_reply and scribe. A Postgres checkpointer persists state after every node."></figure>
+      <p class="sec-note">Five nodes, not nine. Planning and executing were separate until it became clear that is the model's own tool-calling loop, hand-rolled with worse adaptivity — LangGraph is here for the checkpointer and <code>interrupt()</code>, not for node count. The crash-and-resume behaviour is the checkpointer. The tool-approval gate is an interrupt. Neither is bespoke machinery here.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/langgraph.svg" alt="LangGraph state graph: a mention enters the queue, the librarian assembles scoped context, and one agent node runs a tool-calling loop, interrupting to a human gate for write tools while the run parks in a waiting state. A writer produces the draft, a mechanical verifier checks every number and name against evidence and returns it to the writer if unsupported, then the reply is posted and the scribe writes memory."></figure>
       <div class="callout">
         <b>The retry ceiling and the graph checkpoint are the same idea at two altitudes.</b>
         <p>The queue guarantees a run is attempted; the checkpointer guarantees an attempt resumes where it stopped rather than from the top. Without the second one, a crash in <code>reviewer</code> re-runs every tool call before it — which is slow, expensive, and in the case of a write tool, wrong.</p>
@@ -139,7 +139,7 @@
 
     <section class="arch-sec">
       <h2>The turn, as a conversation between agents</h2>
-      <p class="sec-note">Planner fans out; Reviewer is the gate that stands between a draft and the channel.</p>
+      <p class="sec-note">The agent adapts one tool call at a time; the verifier is a mechanical gate, not a second opinion.</p>
       <figure class="figure"><img class="diagram" src="diagrams/turn.svg" alt="Sequence diagram of one turn: Router classifies, Librarian gathers scoped context, Planner fans out to Executor and an A2A analyst, Reviewer gates the draft, Scribe writes memory."></figure>
     </section>
 

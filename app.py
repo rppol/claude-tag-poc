@@ -16,7 +16,7 @@ app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
 
 @app.event("app_mention")
-def on_mention(body, event, ack, logger):
+def on_mention(body, event, ack, say, logger):
     ack()  # before the write, not after: Bolt's auto-ack only fires once we return.
 
     # Our own reply contains the handle it was addressed as, and models echo it.
@@ -30,8 +30,9 @@ def on_mention(body, event, ack, logger):
     # and a module-scope connection raises ProgrammingError from any thread but
     # the one that opened it — which silently drops every mention, because the
     # ack already went out and Slack will never retry a 200.
-    conn = db.connect()
+    conn = None
     try:
+        conn = db.connect()
         is_new = db.enqueue(
             conn,
             event_id=body["event_id"],
@@ -42,8 +43,19 @@ def on_mention(body, event, ack, logger):
             text=event.get("text", ""),
         )
         logger.info(("queued %s" if is_new else "duplicate %s"), body["event_id"])
+    except Exception:
+        # The ack already went out, so Slack will never retry this event. If the
+        # write fails the mention is gone for good — the only honest thing left
+        # is to say so, rather than leave someone waiting on silence.
+        logger.exception("could not queue %s", body.get("event_id"))
+        try:
+            say(text="I couldn't pick that up just now — tag me again?",
+                thread_ts=event.get("thread_ts") or event["ts"])
+        except Exception:
+            logger.exception("and could not report the failure either")
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":

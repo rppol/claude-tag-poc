@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS runs (
   -- except handler, so without this the row sits in 'running' forever and no
   -- worker will ever look at it again. claim() reclaims rows whose lease expired.
   claimed_at TEXT,
+  -- claimed_at is overwritten on every attempt, so the first-claim time — the
+  -- only way to compute queue wait — was destroyed by the first retry.
+  first_claimed_at TEXT,
+  finished_at TEXT,
 
   -- Backoff. Three attempts fired back-to-back in milliseconds turn a 10-second
   -- rate limit into a permanent failure.
@@ -21,6 +25,15 @@ CREATE TABLE IF NOT EXISTS runs (
   -- Set the moment the post succeeds. If anything after the post fails, the
   -- retry must not say the same thing into the channel a second time.
   posted_at  TEXT,
+
+  -- Without these a run is unreconstructable ten seconds after it ends, so the
+  -- corpus you would grade does not exist. "The audit log is the same rows" was
+  -- aspirational until they were here.
+  model       TEXT,
+  duration_ms INTEGER,
+  prompt_chars INTEGER,
+  tokens_in   INTEGER,
+  tokens_out  INTEGER,
 
   answer     TEXT,
   error      TEXT,

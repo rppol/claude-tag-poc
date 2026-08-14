@@ -1,21 +1,19 @@
 flowchart TB
-  START(["mention arrives"]) --> Q[("queue<br/>claim · lease · 3 tries")]
-  Q --> ROUTER{"router<br/><small>worth working on?</small>"}
-  ROUTER -.->|"no"| DROP(["dropped"])
-  ROUTER -->|"yes"| LIB["librarian<br/><small>scoped context</small>"]
-  LIB --> PLAN["planner<br/><small>decompose</small>"]
+  START(["mention arrives"]) --> Q[("queue<br/><small>claim · lease · 3 tries</small>")]
+  Q --> LIB["librarian<br/><small>scope + context</small>"]
+  LIB --> AG["agent<br/><small>tool-calling loop</small>"]
 
-  PLAN --> EXEC["executor<br/><small>MCP tools</small>"]
-  PLAN --> ANA["analyst<br/><small>A2A task</small>"]
-  EXEC -.->|"write tool?<br/>interrupt()"| HUM{{"human approves"}}
-  HUM --> EXEC
+  AG -.->|"write tool<br/>interrupt()"| HUM{{"human approves<br/><small>run parks in 'waiting' —<br/>the lease must not reclaim it</small>"}}
+  HUM --> AG
 
-  EXEC --> REV{"reviewer<br/><small>claims backed?</small>"}
-  ANA --> REV
-  REV -->|"no · max 2"| PLAN
-  REV -->|"yes"| POST["post reply"] --> SCRIBE["scribe<br/><small>write memory</small>"] --> DONE(["done"])
+  AG --> W["writer<br/><small>decides what humans read</small>"]
+  W --> V{"verifier<br/><small>mechanical, no model:<br/>every number and name<br/>must appear in evidence</small>"}
+  V -->|"unsupported"| W
+  V -->|"clean"| POST["post reply"] --> SCRIBE["scribe<br/><small>write only what a tool<br/>asserted or a human confirmed</small>"] --> DONE(["done"])
 
   classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
   classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
-  class START,Q,POST,DONE,DROP built
-  class ROUTER,LIB,PLAN,EXEC,ANA,HUM,REV,SCRIBE design
+  classDef mech stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  class START,Q,POST,DONE built
+  class LIB,AG,HUM,W,SCRIBE design
+  class V mech

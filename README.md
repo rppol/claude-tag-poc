@@ -64,7 +64,7 @@ Two consequences worth naming:
 **Checks** — no dependencies, no credentials, no network:
 
 ```bash
-python3 test_worker.py                  # 13 checks
+python3 test_worker.py                  # 25 checks
 ```
 
 **Scenarios** — the real backend against a live free model:
@@ -72,6 +72,17 @@ python3 test_worker.py                  # 13 checks
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-... python3 tools/run_scenarios.py
 ```
+
+**Answer quality** — the tests pin the plumbing; this grades what the model says:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-... python3 tools/eval.py
+OPENROUTER_API_KEY=sk-or-v1-... python3 tools/eval.py --falsify   # must fail
+```
+
+`--falsify` reruns every case with an **empty thread**. Grounding cases must drop
+to zero — a case that still passes without the evidence is measuring nothing. It
+caught a mislabelled case of mine the first time it ran.
 
 **The whole thing, against Slack:**
 
@@ -156,7 +167,8 @@ the Slack half needs a workspace and a bot token.
 | `app.py` | Listener. Acks inside 3s, writes one row, returns. |
 | `worker.py` | Claims a run, reads the thread, calls the model, posts back. |
 | `db.py` · `schema.sql` | The queue: enqueue, claim, lease, finish, fail. |
-| `test_worker.py` | 13 checks. No framework, no network. |
+| `test_worker.py` | 25 checks. No framework, no network. |
+| `tools/eval.py` | Grades the *answers*. `--falsify` proves the grading can fail. |
 | `tools/run_scenarios.py` | The real backend through manufactured threads, live model. |
 | `docs/` | The simulator: `index.html`, `sim.js`, `style.css`, `diagrams/*.mmd`. |
 | `tools/build.sh` | Renders diagrams, self-hosts fonts, assembles `_site/`. |
