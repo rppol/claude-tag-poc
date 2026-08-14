@@ -103,8 +103,9 @@ code{font-family:var(--code);font-size:.9em}
   padding:1px 5px;border-radius:3px;font-family:var(--code);vertical-align:1px}
 .msg .body{font-size:14.5px;color:var(--text);white-space:pre-wrap;word-wrap:break-word}
 .msg .body code{background:#F0EDF2;padding:1px 4px;border-radius:4px;color:#8A3D6B;border:1px solid #E5DFEA}
-.msg.bot .body{border-left:2px solid var(--plum);padding-left:11px;margin-top:2px}
-.msg.ambient .body{border-left:2px solid var(--amber);padding-left:11px;font-style:italic;color:#5C5560}
+.msg.bot .body{margin-top:2px}
+.msg.ambient .body{background:#FBF4E8;border:1px solid #F0E2CB;border-radius:9px;
+  padding:9px 12px;font-style:italic;color:#5C5560}
 .mention{color:var(--plum-ink);background:#EFE7F5;padding:1px 4px;border-radius:4px;font-weight:500}
 .msg .acts{position:absolute;right:16px;top:-8px;display:none;gap:2px;background:#fff;border:1px solid var(--line);
   border-radius:8px;padding:2px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -164,7 +165,8 @@ code{font-family:var(--code);font-size:.9em}
 .ingress .used{color:var(--mint);font-weight:600;font-size:18px;font-family:var(--code)}
 .ingress .cap{color:var(--mono-dim)}
 .meter{height:4px;background:var(--ink-3);border-radius:3px;margin-top:8px;overflow:hidden}
-.meter i{display:block;height:100%;width:0;background:var(--mint);transition:width .3s}
+.meter i{display:block;height:100%;width:100%;background:var(--mint);
+  transform:scaleX(0);transform-origin:left;transition:transform .3s}
 
 .lanes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 .lanes li{display:grid;grid-template-columns:9px 82px 1fr;gap:8px;align-items:center;
@@ -215,9 +217,9 @@ code{font-family:var(--code);font-size:.9em}
   padding:22px;overflow-x:auto}
 .diagram{display:block;max-width:100%;height:auto;margin:0 auto}
 
-.callout{margin-top:20px;border-left:2px solid var(--mint);background:var(--ink-2);
-  border-radius:0 var(--r) var(--r) 0;padding:16px 20px}
-.callout b{display:block;color:#fff;margin-bottom:7px;font-size:15px}
+.callout{margin-top:20px;border:1px solid var(--ink-3);background:var(--ink-2);
+  border-radius:var(--r-lg);padding:18px 22px}
+.callout b{display:block;color:var(--mint);margin-bottom:7px;font-size:15px}
 .callout p{margin:0;color:var(--mono-dim);font-size:14px;line-height:1.6}
 
 .agents{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px}

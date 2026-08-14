@@ -252,7 +252,7 @@ function ack(){
   const ms = 28 + Math.floor(Math.random()*34);
   $("ackUsed").textContent = ms;
   $("ackVerdict").textContent = "200 OK · budget kept";
-  $("ackBar").style.width = Math.max(1.2,(ms/3000)*100)+"%";
+  $("ackBar").style.transform = `scaleX(${Math.max(0.012, ms/3000)})`;
   trace({ag:"listener", tx:`<b>ack</b> e_${++seq} · well inside 3000`, ms, k:"ok"});
 }
 function setState(s){
