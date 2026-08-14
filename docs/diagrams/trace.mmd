@@ -1,0 +1,19 @@
+flowchart TB
+  subgraph LS ["LangSmith · one run tree"]
+    direction TB
+    RUN["claude_tag_graph<br/><b>2.41s</b> · 12.1k in / 840 out"]
+    RUN --> R1["router · chain<br/>180ms · 1.2k in"]
+    R1 --> R1A["llm call<br/>170ms"]
+    RUN --> R2["librarian · chain<br/>420ms"]
+    R2 --> R2A["mem0.search · tool<br/>90ms · 4 hits in scope"]
+    R2 --> R2B["slack.conversations_replies · tool<br/>140ms"]
+    RUN --> R3["planner · chain<br/>610ms · 5.4k in"]
+    RUN --> R4["executor · chain<br/>780ms"]
+    R4 --> R4A["grafana.query · tool<br/>310ms"]
+    R4 --> R4B["pagerduty.oncall · tool<br/>120ms"]
+    RUN --> R5["reviewer · chain<br/>340ms"]
+    R5 --> R5A["verdict: revise<br/>1 unsupported claim"]
+    RUN --> R6["scribe · chain<br/>80ms · 2 memories"]
+  end
+  RUN -. "tags: channel, identity,<br/>run_id, event_id" .-> META["filterable in the UI"]
+  R5A -. "feedback loop" .-> EVAL[("eval dataset<br/>graded traces")]

@@ -1,0 +1,24 @@
+flowchart LR
+  subgraph SRC ["sources"]
+    AM["Alertmanager"] --> CH["#alerts-prod"]
+    SYN["synthetics"] --> CH
+    CH --> SEN["Sentinel<br/>watches, decides when to speak"]
+  end
+
+  subgraph POLICY ["one policy + credential layer"]
+    GATE{"allowlist · budget · always_ask"}
+    VAULT["credential vault<br/>injected at egress"]
+  end
+
+  SEN --> GATE
+  EXEC["Executor"] --> GATE
+  GATE --> VAULT
+
+  VAULT --> GRAF["Grafana<br/>dashboards, PromQL, panel render"]
+  VAULT --> PD["PagerDuty<br/>oncall, escalation policy, MTTA/MTTR"]
+  VAULT --> GH["GitHub<br/>deploys, PRs"]
+
+  GRAF --> OUT["answer in thread<br/>with panel snapshot"]
+  PD --> OUT
+  GH --> OUT
+  OUT --> AUD[("audit log<br/>every tool call, every actor")]

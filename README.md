@@ -1,10 +1,12 @@
 # claude-tag-poc
 
-![test](https://github.com/rppol/claude-tag-poc/actions/workflows/test.yml/badge.svg)
+![test](https://github.com/rppol/claude-tag-poc/actions/workflows/ci.yml/badge.svg)
 
 A minimal reimplementation of [Claude Tag](https://www.anthropic.com/news/introducing-claude-tag)'s core loop: tag `@Claude` in a Slack thread, it reads the thread and answers in place.
 
-**[Open the simulator →](https://rppol.github.io/claude-tag-poc/)** — a Slack channel on one side, the queue that serves it on the other. Fire a retry storm and watch three Slack events collapse into one run; crash the worker and watch the run survive it.
+**[Open the simulator →](https://rppol.github.io/claude-tag-poc/)** — a chat workspace on one side, the multi-agent runtime that serves it on the other. Nine scenarios: fire a retry storm and watch three events collapse into one run, crash the worker and watch LangGraph resume from a checkpoint, ask across a channel boundary and watch the scope predicate refuse.
+
+Two more tabs: **Architecture** (data flow, agent roster, memory boundary, MCP vs A2A, failure modes) and **Rollout plan** (capacity worked from stated assumptions for 100 engineers, Grafana / alert-channel / escalation integration, phasing, and a review pass that says where it breaks).
 
 See [DESIGN.md](./DESIGN.md) for why it's shaped this way and what was deliberately left out.
 
@@ -82,7 +84,8 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 | `db.py` | SQLite queue: enqueue, claim, finish, fail. |
 | `schema.sql` | One table. |
 | `test_worker.py` | Runnable checks, run in CI on every push. |
-| `docs/index.html` | The simulator. Static, no build step, no key. |
+| `docs/` | Simulator source: `index.html`, `style.css`, `sim.js`, `diagrams/*.mmd`. |
+| `tools/build.sh` | The build. Renders mermaid to SVG, self-hosts fonts, assembles `_site/`. |
 
 ## Status
 
@@ -96,3 +99,20 @@ Socket Mode means no public URL and no ngrok — the app dials out to Slack.
 It runs no model and holds no key. Calling any model API from a public page means shipping the key in client-side JS, where anyone with devtools can take it — and a key on a page served from GitHub Pages is a key you have published. That's true of OpenRouter, and Anthropic gates the equivalent behind a header named `anthropic-dangerous-direct-browser-access`, where the name is the warning.
 
 The trade is a good one: "an LLM returns text" isn't the interesting part of Claude Tag. The state machine is — the ack seam, the dedupe, the claim, the requeue — and that's what the page actually runs. The real backend does call a live model; see Status above.
+
+## The build
+
+The published page fetches nothing at runtime — no CDN, no Google Fonts, no diagram
+library. Everything expensive is moved into CI:
+
+```
+tools/build.sh
+  → renders docs/diagrams/*.mmd to SVG   (mermaid-cli + headless Chromium)
+  → gives each SVG an intrinsic size     (else <img> falls back to 300x150 and clips)
+  → downloads the webfonts and rewrites the CSS to point at local files
+  → copies the static files into _site/
+  → fails the build if any runtime asset still points off-site
+```
+
+Run it locally with `./tools/build.sh`, then serve `_site/`. GitHub Pages deploys the
+same artifact from `.github/workflows/ci.yml`.

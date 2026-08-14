@@ -1,0 +1,21 @@
+flowchart TB
+  subgraph MCP ["MCP · reaching a tool you own"]
+    direction LR
+    EX["Executor"] --> POL{"policy gate<br/>allowlist + always_ask"}
+    POL -- "denied" --> DN["refused, logged"]
+    POL -- "ask" --> HU["human approves in thread"]
+    HU --> SRV["MCP server"]
+    POL -- "allow" --> SRV
+    SRV --> CRED["credential injected<br/>outside the sandbox"]
+    CRED --> API["Grafana · PagerDuty · GitHub"]
+  end
+
+  subgraph A2A ["A2A · handing work to another agent"]
+    direction LR
+    PL["Planner"] --> CARD["fetch agent card<br/>skills, auth, endpoint"]
+    CARD --> TASK["create task"]
+    TASK --> ST{"task lifecycle"}
+    ST --> WK["working"] --> ART["artifacts + citations"]
+    ST --> FAIL["failed / rejected"]
+    ART --> PL
+  end

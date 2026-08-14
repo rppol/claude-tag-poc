@@ -3,411 +3,215 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claude-tag-poc — the ack seam</title>
-<meta name="description" content="A Slack thread on one side, the queue that serves it on the other. Watch the 3-second ack seam do its job.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;700&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
-<style>
-:root{
-  /* This page paints both a light and a dark register on purpose. Declaring
-     color-scheme opts out of Chrome's auto-dark, which would otherwise invert
-     the chat side and collapse the contrast the layout is built on. */
-  color-scheme:dark light;
-  --ink:#17131F; --ink-2:#201A2B; --ink-3:#2B2338;
-  --paper:#FCFAFE; --paper-2:#F1ECF7;
-  --plum:#7A5AA0; --plum-dim:#4A3A5E;
-  --mint:#47D6A6; --amber:#E9A648; --rust:#D45F45;
-  --text:#1B1522; --text-dim:#6E6479; --mono:#C8BFD6; --mono-dim:#796E8C;
-  --r:10px;
-}
-*{box-sizing:border-box}
-html,body{margin:0;height:100%}
-body{
-  background:var(--ink); color:var(--text);
-  font:400 15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  -webkit-font-smoothing:antialiased;
-}
-h1,h2,h3,.ui{font-family:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif}
-.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
-button{font:inherit;cursor:pointer}
-:focus-visible{outline:2px solid var(--mint);outline-offset:2px;border-radius:4px}
-
-/* ── masthead ─────────────────────────────────────────── */
-header{
-  display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
-  padding:20px 24px 18px;border-bottom:1px solid var(--ink-3);
-}
-header h1{
-  margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--paper);
-}
-header .sub{color:var(--mono-dim);font-size:13px}
-.badge{
-  margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.06em;
-  text-transform:uppercase;color:var(--amber);border:1px solid color-mix(in srgb,var(--amber) 40%,transparent);
-  padding:4px 9px;border-radius:999px;white-space:nowrap;
-}
-
-/* ── the split ────────────────────────────────────────── */
-.stage{display:grid;grid-template-columns:1fr 62px 1fr;min-height:calc(100vh - 62px)}
-
-/* left: the social surface */
-.slack{background:var(--paper);display:flex;flex-direction:column;min-width:0}
-.chan{
-  padding:14px 20px;border-bottom:1px solid var(--paper-2);
-  display:flex;align-items:center;gap:9px;
-}
-.chan b{font-family:"Bricolage Grotesque",sans-serif;font-size:15px}
-.chan span{color:var(--text-dim);font-size:13px}
-.msgs{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
-.msg{display:grid;grid-template-columns:34px 1fr;gap:11px;align-items:start}
-.av{
-  width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
-  font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:13px;color:#fff;
-}
-.msg .who{font-family:"Bricolage Grotesque",sans-serif;font-weight:500;font-size:14px}
-.msg .at{color:var(--text-dim);font-size:11px;margin-left:6px;font-family:"IBM Plex Mono",monospace}
-.msg .body{font-size:14.5px;white-space:pre-wrap;word-wrap:break-word}
-.msg.bot .body{border-left:2px solid var(--plum);padding-left:11px}
-.mention{color:var(--plum);background:color-mix(in srgb,var(--plum) 12%,transparent);
-  padding:1px 4px;border-radius:4px;font-weight:500}
-.typing{color:var(--text-dim);font-size:13px;font-style:italic}
-
-.composer{padding:14px 20px 10px;border-top:1px solid var(--paper-2)}
-.box{display:flex;gap:8px}
-.box input{
-  flex:1;min-width:0;padding:11px 13px;border:1px solid #DDD3E8;border-radius:var(--r);
-  background:#fff;font:inherit;color:var(--text);
-}
-.box input::placeholder{color:#A99DB8}
-.box button{
-  padding:11px 17px;border:0;border-radius:var(--r);background:var(--plum);color:#fff;
-  font-family:"Bricolage Grotesque",sans-serif;font-weight:500;
-}
-.box button:hover{background:#68488E}
-.scenarios{display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px 18px}
-.scenarios button{
-  padding:7px 12px;border:1px solid #DDD3E8;background:#fff;border-radius:999px;
-  font-size:12.5px;color:var(--text);font-family:"Bricolage Grotesque",sans-serif;
-}
-.scenarios button:hover{border-color:var(--plum);color:var(--plum)}
-
-/* middle: the seam — the signature element */
-.seam{
-  position:relative;background:var(--ink);
-  border-left:1px solid var(--ink-3);border-right:1px solid var(--ink-3);
-  display:grid;place-items:center;overflow:hidden;
-}
-.seam::before{
-  content:"";position:absolute;inset:0 auto 0 50%;width:1px;
-  background:repeating-linear-gradient(to bottom,var(--plum-dim) 0 5px,transparent 5px 11px);
-}
-.seam .label{
-  writing-mode:vertical-rl;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
-  letter-spacing:.22em;text-transform:uppercase;color:var(--mono-dim);
-  background:var(--ink);padding:12px 3px;position:relative;
-}
-/* an event crossing the seam, left to right: a bright head with a trailing
-   fade, so it reads as a packet in motion rather than a decorative dot */
-.tok{
-  position:absolute;left:-26px;width:24px;height:3px;border-radius:2px;
-  background:linear-gradient(to right,transparent,var(--mint));
-  animation:cross .62s cubic-bezier(.5,0,.5,1) forwards;
-}
-@keyframes cross{to{left:calc(100% + 26px)}}
-
-/* right: the machine */
-.machine{background:var(--ink);color:var(--mono);padding:18px 20px;overflow-y:auto;min-width:0}
-.machine h2{
-  font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--mono-dim);
-  margin:0 0 10px;font-weight:500;
-}
-.machine section+section{margin-top:24px}
-
-/* Named .ingress, not .ack: the event log below uses .k.ack for its keyword,
-   and a bare .ack rule would style both — the panel's padding and radius would
-   leak onto every "ack" word in the log. */
-.ingress{background:var(--ink-2);border:1px solid var(--ink-3);border-radius:var(--r);padding:13px 15px}
-.ingress .row{display:flex;justify-content:space-between;align-items:baseline;font-family:"IBM Plex Mono",monospace;font-size:12px}
-.ingress .used{color:var(--mint);font-weight:700;font-size:19px}
-.ingress .cap{color:var(--mono-dim)}
-.meter{height:5px;background:var(--ink-3);border-radius:3px;margin-top:9px;overflow:hidden}
-.meter i{display:block;height:100%;background:var(--mint);width:1.4%;transition:width .3s}
-.ingress .note{color:var(--mono-dim);font-size:11.5px;margin-top:8px;line-height:1.45}
-
-table{width:100%;border-collapse:collapse;font-family:"IBM Plex Mono",monospace;font-size:12px}
-th{
-  text-align:left;color:var(--mono-dim);font-weight:400;font-size:10.5px;
-  letter-spacing:.1em;text-transform:uppercase;padding:0 8px 7px 0;border-bottom:1px solid var(--ink-3);
-}
-td{padding:8px 8px 8px 0;border-bottom:1px solid var(--ink-2);vertical-align:top}
-tr.hot td{background:color-mix(in srgb,var(--mint) 7%,transparent)}
-.st{font-weight:700}
-.st.queued{color:var(--mono-dim)} .st.running{color:var(--mint)}
-.st.done{color:var(--plum)} .st.failed{color:var(--rust)}
-.empty{color:var(--mono-dim);font-size:12px;font-family:"IBM Plex Mono",monospace;padding:10px 0}
-
-.log{font-family:"IBM Plex Mono",monospace;font-size:11.5px;line-height:1.85;max-height:270px;overflow-y:auto}
-.log div{display:grid;grid-template-columns:64px 74px 1fr;gap:9px;color:var(--mono-dim)}
-.log .t{color:var(--plum-dim)}
-.log .k{font-weight:700}
-.log .k.ack{color:var(--mint)} .log .k.insert{color:var(--mono)}
-.log .k.dedupe{color:var(--amber)} .log .k.claim{color:var(--mint)}
-.log .k.post{color:var(--plum)} .log .k.error{color:var(--rust)}
-
-footer{padding:14px 24px;border-top:1px solid var(--ink-3);color:var(--mono-dim);font-size:12px}
-footer a{color:var(--mono)}
-
-@media (max-width:900px){
-  .stage{grid-template-columns:1fr;grid-template-rows:auto 40px auto}
-  .seam{border:0;border-top:1px solid var(--ink-3);border-bottom:1px solid var(--ink-3)}
-  .seam::before{inset:50% 0 auto 0;width:auto;height:1px;
-    background:repeating-linear-gradient(to right,var(--plum-dim) 0 5px,transparent 5px 11px)}
-  .seam .label{writing-mode:horizontal-tb;padding:3px 12px}
-  .tok{animation:none;display:none}
-  .msgs{max-height:44vh}
-}
-@media (prefers-reduced-motion:reduce){
-  *{animation-duration:.001ms!important;transition-duration:.001ms!important}
-}
-</style>
+<title>claude-tag-poc — a multi-agent chat teammate</title>
+<meta name="description" content="A simulated multi-agent system behind an @mention: routing, scoped memory, MCP tools, A2A delegation, Grafana and escalation integration, sized for 100 users.">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<header>
-  <h1>claude-tag-poc</h1>
-  <span class="sub ui">A Slack thread on one side, the queue that serves it on the other.</span>
-  <span class="badge">Simulated · no backend, no API key</span>
+<header class="top">
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b>claude-tag-poc</b></div>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" id="tab-sim" aria-controls="view-sim" aria-selected="true" class="on">Simulator</button>
+    <button role="tab" id="tab-arch" aria-controls="view-arch" aria-selected="false">Architecture</button>
+    <button role="tab" id="tab-plan" aria-controls="view-plan" aria-selected="false">Rollout&nbsp;plan</button>
+  </nav>
+  <span class="badge">Simulated · no backend, no keys, no model</span>
 </header>
 
-<div class="stage">
+<!-- ══════════════════════ SIMULATOR ══════════════════════ -->
+<main id="view-sim" role="tabpanel" aria-labelledby="tab-sim" class="view on">
+<div class="workspace">
 
-  <!-- what Slack sees -->
-  <div class="slack">
-    <div class="chan">
-      <b># eng-alerts</b><span>3 members</span>
+  <div class="rail">
+    <div class="ws" title="Acme Engineering">AE</div>
+    <div class="rail-ico on" title="Channels">#</div>
+    <div class="rail-ico" title="Threads">◔</div>
+    <div class="rail-ico" title="Activity">◈</div>
+    <div class="rail-me" title="You">YO</div>
+  </div>
+
+  <aside class="side">
+    <div class="side-head"><b>Acme Engineering</b><span>7 members · 4 channels</span></div>
+    <div class="side-group">Channels</div>
+    <ul class="chans" id="chans"></ul>
+    <div class="side-group">Apps</div>
+    <ul class="chans"><li class="chan-app"><span class="app-dot"></span>Claude<span class="app-tag">APP</span></li></ul>
+  </aside>
+
+  <section class="chat">
+    <div class="chat-head">
+      <div><b id="chanName"># incidents</b>
+      <span class="topic" id="chanTopic">prod issues · page @oncall · Claude is in this channel</span></div>
+      <div class="faces" id="faces"></div>
     </div>
     <div class="msgs" id="msgs"></div>
     <div class="composer">
       <form class="box" id="form">
-        <label for="input" class="sr-only" style="position:absolute;left:-9999px">Message #eng-alerts</label>
-        <input id="input" autocomplete="off" placeholder="Message #eng-alerts — mention @Claude to start a run">
-        <button type="submit">Send</button>
+        <label for="input" class="sr-only">Message</label>
+        <div class="box-in">
+          <input id="input" autocomplete="off" placeholder="Message #incidents — mention @Claude to start a run">
+          <div class="box-tools" aria-hidden="true"><span><b>B</b></span><span><i>i</i></span><span>‹›</span><span>☺</span></div>
+        </div>
+        <button type="submit" class="send" aria-label="Send">Send</button>
       </form>
     </div>
     <div class="scenarios">
-      <button id="storm">Fire retry storm</button>
-      <button id="crash">Crash the worker</button>
-      <button id="reset">Reset</button>
+      <span class="sc-label">Scenarios</span>
+      <div class="sc-grid" id="scenarios"></div>
     </div>
-  </div>
+  </section>
 
-  <!-- the seam -->
-  <div class="seam" id="seam"><span class="label">3-second ack seam</span></div>
-
-  <!-- what the system does -->
-  <div class="machine">
-    <section>
-      <h2>Ingress</h2>
+  <aside class="runtime">
+    <div class="rt-head"><b>Runtime</b><span id="rtState">idle</span></div>
+    <section class="rt-sec">
+      <h2>Ingress <em>3s ack budget</em></h2>
       <div class="ingress">
-        <div class="row">
-          <span><span class="used" id="ackUsed">—</span> <span class="cap">/ 3000 ms</span></span>
-          <span class="cap" id="ackVerdict">idle</span>
-        </div>
-        <div class="meter"><i id="ackBar" style="width:0"></i></div>
-        <p class="note">Slack wants HTTP 200 within 3&nbsp;s and retries with the <em>same</em> event id if it doesn't get one. The listener acks, writes one row, and returns — so a retry is a duplicate <em>row</em> attempt, which the unique event id absorbs.</p>
+        <div class="row"><span><b class="used" id="ackUsed">—</b> <span class="cap">/ 3000 ms</span></span><span class="cap" id="ackVerdict">idle</span></div>
+        <div class="meter"><i id="ackBar"></i></div>
+      </div>
+    </section>
+    <section class="rt-sec">
+      <h2>LangGraph <em>state graph</em></h2>
+      <ul class="lanes" id="lanes"></ul>
+      <div class="ckpt" id="ckpt">checkpoint <b>—</b></div>
+    </section>
+    <section class="rt-sec">
+      <h2>LangSmith <em>run tree</em></h2>
+      <div class="tstats" id="tstats"></div>
+      <div class="trace" id="trace" aria-live="polite"></div>
+      <div class="empty" id="traceEmpty">Nothing running. Pick a scenario, or mention @Claude.</div>
+    </section>
+  </aside>
+
+</div>
+</main>
+
+<!-- ══════════════════════ ARCHITECTURE ══════════════════════ -->
+<main id="view-arch" role="tabpanel" aria-labelledby="tab-arch" class="view">
+  <div class="arch">
+
+    <section class="arch-hero">
+      <p class="eyebrow">System design</p>
+      <h1>An <em>@mention</em> is a distributed system with a three-second front door.</h1>
+      <p class="lede">Everything here exists because the chat platform retries any event it thinks you dropped, using the same event id. Split at that deadline and the rest follows: what you can no longer do synchronously has to become a queue, and what a queue makes possible is a team of agents rather than one prompt.</p>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Data flow</h2>
+      <p class="sec-note">One mention, end to end. Everything below <code>ack</code> happens after the platform has already been told <code>200 OK</code>.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/flow.svg" alt="Data flow: a mention enters the listener, is acked within 3 seconds and written to a queue, then a worker drives Router, Librarian, Planner, Executor, Reviewer and Scribe before posting back to the thread."></figure>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Who does what</h2>
+      <p class="sec-note">Each agent owns exactly one decision. An agent that owns two decisions is two agents that have not been separated yet.</p>
+      <div class="agents" id="agentCards"></div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Orchestration is a graph, not a script</h2>
+      <p class="sec-note">LangGraph gives the three things a hand-rolled loop always ends up reinventing badly: conditional edges, a checkpointer, and <code>interrupt()</code>. The crash-and-resume behaviour is the checkpointer. The tool-approval gate is an interrupt. Neither is bespoke machinery here.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/langgraph.svg" alt="LangGraph state graph: START to router, which conditionally routes to END or librarian, then planner, which fans out to executor or analyst or straight to reviewer. Executor can interrupt for a human gate. Reviewer loops back to planner to revise, or forwards to post_reply and scribe. A Postgres checkpointer persists state after every node."></figure>
+      <div class="callout">
+        <b>The retry ceiling and the graph checkpoint are the same idea at two altitudes.</b>
+        <p>The queue guarantees a run is attempted; the checkpointer guarantees an attempt resumes where it stopped rather than from the top. Without the second one, a crash in <code>reviewer</code> re-runs every tool call before it — which is slow, expensive, and in the case of a write tool, wrong.</p>
       </div>
     </section>
 
-    <section>
-      <h2>Runs</h2>
-      <table>
-        <thead><tr><th>#</th><th>event</th><th>status</th><th>try</th></tr></thead>
-        <tbody id="runs"></tbody>
-      </table>
-      <div class="empty" id="runsEmpty">No runs yet — mention @Claude in the channel.</div>
+    <section class="arch-sec">
+      <h2>If it isn't traced, it didn't happen</h2>
+      <p class="sec-note">LangSmith turns each run into a tree of spans with latency, tokens and status. That is the difference between "the bot said something odd" and "the librarian returned four memories, two of which were stale, and the planner anchored on the wrong one".</p>
+      <figure class="figure"><img class="diagram" src="diagrams/trace.svg" alt="A LangSmith run tree for one graph invocation, showing per-node spans with latency and token counts, nested tool calls, a reviewer verdict of revise, and a feedback loop into a graded eval dataset."></figure>
     </section>
 
-    <section>
-      <h2>Event log</h2>
-      <div class="log" id="log" aria-live="polite"></div>
+    <section class="arch-sec">
+      <h2>The turn, as a conversation between agents</h2>
+      <p class="sec-note">Planner fans out; Reviewer is the gate that stands between a draft and the channel.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/turn.svg" alt="Sequence diagram of one turn: Router classifies, Librarian gathers scoped context, Planner fans out to Executor and an A2A analyst, Reviewer gates the draft, Scribe writes memory."></figure>
     </section>
+
+    <section class="arch-sec">
+      <h2>Memory</h2>
+      <p class="sec-note">The part that is a security boundary rather than a feature.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/memory.svg" alt="Memory retrieval: the channel binding resolves to an identity scope, which is applied inside the vector query predicate before ranking, never after."></figure>
+      <div class="callout">
+        <b>The scope filter belongs in the query predicate, never after retrieval.</b>
+        <p>Post-filtering leaks through result counts, ranking behaviour and latency, and it sits one refactor away from being deleted by someone who reads it as a redundant guard. Scope is derived from the inbound event's channel binding — never from anything in the request body, because in a public channel the request body is attacker-controlled.</p>
+      </div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Reaching a tool vs. reaching an agent</h2>
+      <p class="sec-note">Two problems that look alike and are not. MCP is a typed call into a capability you own. A2A is a task handed to something with its own goals, its own model and its own lifecycle.</p>
+      <div class="proto" id="protoCards"></div>
+      <figure class="figure"><img class="diagram" src="diagrams/proto.svg" alt="MCP is a typed synchronous call to a tool server behind a policy gate; A2A is an asynchronous task handed to an external agent with its own lifecycle."></figure>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Stack</h2>
+      <p class="sec-note">Chosen for what it removes. Anything here that could be a table and a for-loop, should be.</p>
+      <div class="stack" id="stackTable"></div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Failure modes</h2>
+      <p class="sec-note">The list a design is actually judged on.</p>
+      <div class="fails" id="failTable"></div>
+    </section>
+
   </div>
-</div>
+</main>
 
-<footer>
-  Responses here are scripted — the page runs no model and holds no key.
-  The state machine mirrors <code>db.py</code>: unique event id, <code>BEGIN IMMEDIATE</code> claim, three attempts then failed.
+<!-- ══════════════════════ ROLLOUT PLAN ══════════════════════ -->
+<main id="view-plan" role="tabpanel" aria-labelledby="tab-plan" class="view">
+  <div class="arch">
+
+    <section class="arch-hero">
+      <p class="eyebrow">Rollout · 100 engineers</p>
+      <h1>What it takes to put this in front of a real engineering org.</h1>
+      <p class="lede">Sizing, integrations, and the review pass that says where it breaks. Numbers are worked from stated assumptions rather than asserted — the assumptions are the part worth arguing with.</p>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Integration topology</h2>
+      <p class="sec-note">Alert channels, Grafana, and the escalation system reach the agents through one policy layer. Nothing talks to a credential directly.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/integration.svg" alt="Integration topology: alert channels, Grafana, and the escalation system reach agents through a single policy and credential layer."></figure>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Capacity</h2>
+      <p class="sec-note">Every row is an assumption you can change. Load is derived, not guessed.</p>
+      <div class="stack" id="capTable"></div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Integrations, concretely</h2>
+      <div class="integ" id="integCards"></div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Phasing</h2>
+      <p class="sec-note">Each phase ends at a decision, not a date.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/phases.svg" alt="Four rollout phases, each ending at a go or no-go decision rather than a date."></figure>
+      <div class="phases" id="phaseCards"></div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>Review pass</h2>
+      <p class="sec-note">The Reviewer agent's job, applied to the plan itself. Ordered by what would actually stop a rollout.</p>
+      <div class="review" id="reviewTable"></div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="foot">
+  <span>Simulation only — no model runs here and no key is held. The scenarios replay a designed system so its behaviour can be inspected.</span>
+  <a href="https://github.com/rppol/claude-tag-poc">Source</a>
 </footer>
 
-<script>
-// ── state ───────────────────────────────────────────────
-// Mirrors db.py. Two implementations of one state machine is the honest cost of
-// demonstrating it in a browser; the alternative was shipping a Python runtime.
-const MAX_ATTEMPTS = 3;
-const PEOPLE = {
-  alice: {name:"Alice Rao",   color:"#7A5AA0"},
-  bob:   {name:"Bob Menon",   color:"#C2612F"},
-  you:   {name:"You",         color:"#2F7D6B"},
-  claude:{name:"Claude",      color:"#3C3350"}
-};
-const REPLIES = [
-  "The 500s start at 14:02, same minute the retry budget dropped to 0. `retry.max_attempts` went 3 → 0 in the deploy an hour earlier.",
-  "Three of those stack traces are the same connection-pool timeout. The fourth is different — that one's a null in the serializer.",
-  "Rolled back config only, not code. Error rate is flat for 6 minutes now. Want me to open the revert PR?"
-];
-
-let runs, log, seq, evSeq, crashArmed, replyIdx, working;
-
-function reset(){
-  runs=[]; log=[]; seq=0; evSeq=0; crashArmed=false; replyIdx=0; working=false;
-  document.getElementById("msgs").innerHTML="";
-  say("alice","prod is 500ing, started a few minutes ago");
-  say("bob","same, seeing it on checkout too");
-  document.getElementById("ackUsed").textContent="—";
-  document.getElementById("ackVerdict").textContent="idle";
-  document.getElementById("ackBar").style.width="0";
-  render();
-}
-
-const now=()=>new Date().toTimeString().slice(0,8);
-function note(kind,ev,msg){ log.unshift({t:now(),kind,ev,msg}); renderLog(); }
-
-// enqueue: returns false when Slack is retrying an event we already hold.
-function enqueue(eventId,text){
-  if(runs.some(r=>r.event===eventId)){ note("dedupe",eventId,"already queued — ignored"); return false; }
-  runs.unshift({id:++seq,event:eventId,text,status:"queued",attempts:0});
-  note("insert",eventId,"run #"+seq+" queued");
-  return true;
-}
-// claim: oldest queued run, marked running, attempt counted.
-function claim(){
-  const r=[...runs].reverse().find(r=>r.status==="queued");
-  if(r){ r.status="running"; r.attempts++; }
-  return r;
-}
-
-// ── the ack race ────────────────────────────────────────
-function ack(eventId){
-  const ms = 28 + Math.floor(Math.random()*34);          // realistic Bolt ack
-  document.getElementById("ackUsed").textContent = ms;
-  document.getElementById("ackVerdict").textContent = "200 OK · budget kept";
-  document.getElementById("ackBar").style.width = Math.max(1.2,(ms/3000)*100)+"%";
-  note("ack",eventId,ms+" ms — well inside 3000");
-  crossSeam();
-}
-function crossSeam(){
-  if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const t=document.createElement("i"); t.className="tok";
-  document.getElementById("seam").appendChild(t);
-  setTimeout(()=>t.remove(),700);
-}
-
-// ── the worker ──────────────────────────────────────────
-async function work(){
-  if(working) return; working=true;
-  while(true){
-    const r=claim(); if(!r) break;
-    note("claim","#"+r.id,"attempt "+r.attempts);
-    render();
-    const t=typing(); await wait(1100);
-
-    if(crashArmed){                                       // requeue, or give up
-      crashArmed=false;
-      t.remove();
-      r.status = r.attempts>=MAX_ATTEMPTS ? "failed" : "queued";
-      note("error","#"+r.id, r.status==="failed"
-        ? "third strike — marked failed, will not requeue"
-        : "worker died — requeued (attempt "+r.attempts+"/"+MAX_ATTEMPTS+")");
-      render();
-      if(r.status==="failed"){ say("claude","I hit an error three times on that one and stopped retrying. The run is marked failed."); }
-      continue;
-    }
-    t.remove();
-    const text=REPLIES[replyIdx++ % REPLIES.length];
-    r.status="done";
-    say("claude",text);
-    note("post","#"+r.id,"chat.postMessage → thread");
-    render();
-  }
-  working=false;
-}
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
-
-// ── chat rendering ──────────────────────────────────────
-function say(who,text){
-  const p=PEOPLE[who], box=document.getElementById("msgs");
-  const el=document.createElement("div");
-  el.className="msg"+(who==="claude"?" bot":"");
-  const initials = who==="claude" ? "C" : p.name.split(" ").map(s=>s[0]).join("");
-  el.innerHTML=`<div class="av" style="background:${p.color}">${initials}</div>
-    <div><div><span class="who">${p.name}</span><span class="at">${now()}</span></div>
-    <div class="body">${fmt(text)}</div></div>`;
-  box.appendChild(el); box.scrollTop=box.scrollHeight;
-  return el;
-}
-function typing(){
-  const box=document.getElementById("msgs");
-  const el=document.createElement("div");
-  el.className="msg"; el.innerHTML=`<div class="av" style="background:${PEOPLE.claude.color}">C</div>
-    <div class="typing">Claude is working…</div>`;
-  box.appendChild(el); box.scrollTop=box.scrollHeight;
-  return el;
-}
-const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-const fmt=s=>esc(s)
-  .replace(/@Claude/gi,'<span class="mention">@Claude</span>')
-  .replace(/`([^`]+)`/g,'<code>$1</code>');
-
-// ── panels ──────────────────────────────────────────────
-function render(){
-  const tb=document.getElementById("runs");
-  document.getElementById("runsEmpty").style.display = runs.length ? "none" : "block";
-  tb.innerHTML = runs.map(r=>`<tr class="${r.status==="running"?"hot":""}">
-    <td>${r.id}</td><td>${r.event}</td>
-    <td class="st ${r.status}">${r.status}</td><td>${r.attempts}</td></tr>`).join("");
-}
-function renderLog(){
-  document.getElementById("log").innerHTML = log.slice(0,40).map(e=>
-    `<div><span class="t">${e.t}</span><span class="k ${e.kind}">${e.kind}</span><span>${esc(e.ev)} · ${esc(e.msg)}</span></div>`
-  ).join("");
-}
-
-// ── input ───────────────────────────────────────────────
-function send(text){
-  say("you",text);
-  if(!/@claude/i.test(text)){ note("ack","—","no mention — nothing queued"); return; }
-  const ev="e_"+(++evSeq).toString().padStart(3,"0");
-  ack(ev);
-  if(enqueue(ev,text)){ render(); work(); }
-}
-
-document.getElementById("form").addEventListener("submit",e=>{
-  e.preventDefault();
-  const i=document.getElementById("input"), v=i.value.trim();
-  if(v){ send(v); i.value=""; }
-});
-document.getElementById("storm").addEventListener("click",()=>{
-  // Slack retries an unacked event with the SAME id. One run, two ignored.
-  say("bob","@Claude what broke?");
-  const ev="e_"+(++evSeq).toString().padStart(3,"0");
-  ack(ev);
-  if(enqueue(ev,"@Claude what broke?")){ render(); work(); }
-  setTimeout(()=>{ note("ack",ev,"Slack retry 1/2"); enqueue(ev,""); },420);
-  setTimeout(()=>{ note("ack",ev,"Slack retry 2/2"); enqueue(ev,""); },840);
-});
-document.getElementById("crash").addEventListener("click",()=>{
-  crashArmed=true;
-  note("error","—","next claim will die mid-run");
-  if(!runs.some(r=>r.status==="queued"||r.status==="running")){
-    say("alice","@Claude can you check the retry config?");
-    const ev="e_"+(++evSeq).toString().padStart(3,"0");
-    ack(ev); enqueue(ev,"@Claude can you check the retry config?"); render(); work();
-  }
-});
-document.getElementById("reset").addEventListener("click",reset);
-
-reset();
-</script>
+<script src="sim.js" defer></script>
 </body>
 </html>

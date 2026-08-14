@@ -1,0 +1,22 @@
+flowchart TB
+  U["@Claude mentioned in #incidents"] --> L["Listener · Bolt over Socket Mode"]
+  L -- "200 OK in ~40ms" --> P["Chat platform"]
+  P -. "retries same event_id if unacked" .-> L
+  L --> Q[("runs queue · UNIQUE event_id<br/>absorbs the retry storm")]
+
+  subgraph AFTER ["everything past here is asynchronous"]
+    direction TB
+    Q --> W["Worker · claim, lease, 3-attempt ceiling"]
+    W --> R{"Router<br/>is this worth work?"}
+    R -- "no" --> D["dropped, logged"]
+    R -- "yes" --> LB["Librarian<br/>scoped context"]
+    LB --> PL["Planner"]
+    PL --> EX["Executor · MCP tools"]
+    PL --> AN["Analyst · A2A task"]
+    EX --> RV{"Reviewer<br/>claims backed by evidence?"}
+    AN --> RV
+    RV -- "rejected" --> PL
+    RV -- "approved" --> OUT["post into the thread"]
+    OUT --> SC["Scribe"]
+    SC --> MEM[("memory · scoped to identity")]
+  end

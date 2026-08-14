@@ -1,0 +1,22 @@
+flowchart TB
+  START(["START"]) --> ROUTER["router<br/><i>classify intent</i>"]
+  ROUTER -.->|"not_for_us"| END1(["END"])
+  ROUTER -->|"question / incident"| LIB["librarian<br/><i>scoped context</i>"]
+  LIB --> PLAN["planner<br/><i>decompose</i>"]
+
+  PLAN -->|"needs_tools"| EXEC["executor<br/><i>MCP calls</i>"]
+  PLAN -->|"needs_specialist"| ANA["analyst<br/><i>A2A task</i>"]
+  PLAN -->|"answerable_now"| REV
+
+  EXEC -. "interrupt()<br/>await human approval" .-> HUM{{"human_gate"}}
+  HUM -->|"approved"| EXEC
+  HUM -->|"denied"| REV
+  EXEC --> REV["reviewer<br/><i>evidence check</i>"]
+  ANA --> REV
+
+  REV -->|"revise · max 2"| PLAN
+  REV -->|"approved"| POST["post_reply"]
+  POST --> SCRIBE["scribe<br/><i>write memory</i>"]
+  SCRIBE --> END2(["END"])
+
+  CP[("checkpointer<br/>Postgres saver")] -. "state persisted<br/>after every node" .- PLAN

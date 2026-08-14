@@ -1,0 +1,10 @@
+flowchart LR
+  P1["Phase 1 · shadow<br/>1 channel, 6 people<br/>read-only tools"] --> D1{"answers useful<br/>without a human rewriting?"}
+  D1 -- no --> P1
+  D1 -- yes --> P2["Phase 2 · assisted<br/>3 channels, 25 people<br/>memory on, always_ask writes"]
+  P2 --> D2{"scope isolation holds<br/>under a red-team pass?"}
+  D2 -- no --> FIX["fix predicate, re-test"] --> D2
+  D2 -- yes --> P3["Phase 3 · org<br/>all 100, ambient off"]
+  P3 --> D3{"noise complaints<br/>under threshold?"}
+  D3 -- no --> TUNE["raise gate, cut rate"] --> D3
+  D3 -- yes --> P4["Phase 4 · ambient<br/>opt-in per channel"]
