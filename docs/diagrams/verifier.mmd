@@ -1,0 +1,25 @@
+flowchart TB
+  D["draft from the writer"] --> EX["extract claim tokens<br/><small>time · version · number-with-unit ·<br/>backticked or dotted identifier · @handle</small>"]
+  EV[("evidence corpus<br/><small>tool results + transcript + retrieved memories</small>")] --> EXE["extract the same classes"]
+
+  EX --> NORM["normalise<br/><small>lowercase · strip backticks and the v prefix ·<br/>1-significant-figure near-match, so 41.2 supports 41</small>"]
+  EXE --> NORM
+  NORM --> DIFF{"set difference"}
+
+  DIFF -->|"empty"| SHAPE{"causal shape<br/><small>every CAUSAL connective must share<br/>its sentence with a HEDGE</small>"}
+  DIFF -->|"anything left over"| BACK["reject, naming the exact tokens<br/><small>back to the writer — once</small>"]
+  SHAPE -->|"hedged or absent"| PASS(["post"])
+  SHAPE -->|"unhedged"| BACK
+  BACK --> D
+
+  X1["<small><b>Deliberately excluded from the corpus:</b><br/>the model's own prior turns and the system prompts.<br/>A draft cannot be its own evidence — that one<br/>exclusion is what separates a verifier from a<br/>rubber stamp.</small>"]
+  X2["<small><b>Known hole:</b> right tokens, wrong pairing.<br/>Evidence says 41/s at 15:01, the draft says<br/>41/s at 14:01 — both present, relationship<br/>invented. Passes. Fixing it needs span-level<br/>evidence binding, which is not 45 lines.</small>"]
+
+  classDef mech stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  classDef bad stroke:#DB6A50,fill:#33201B,color:#F0C9BE
+  classDef note fill:none,stroke:none,color:#8B7FA0
+  class EX,EXE,NORM,DIFF,SHAPE mech
+  class D,EV,PASS built
+  class BACK bad
+  class X1,X2 note

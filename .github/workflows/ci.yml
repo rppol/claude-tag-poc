@@ -20,9 +20,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       # No pip install: the tests drive the real code path with fake clients,
       # so they need nothing but the standard library.
-      - run: python3 test_worker.py
+      - name: backend — queue, lease, retry, transcript, mrkdwn
+        run: python3 test_worker.py
+      # The registry is load-bearing: the simulator executes it and the
+      # architecture tab documents it. This fails if they can diverge, if an
+      # irreversible write is `auto`, if slack.post_message ever appears, or if
+      # a hand-written fixture cannot survive the real verifier.
+      - name: registry — agents, tools, flows, fixtures
+        run: node tools/check_registry.js
 
   build:
     needs: test
@@ -38,6 +48,8 @@ jobs:
       # Everything expensive happens here — Chromium for mermaid, font
       # downloads — so the published page fetches nothing at runtime.
       - run: ./tools/build.sh
+      - name: prove the runtime-asset guard can fail
+        run: ./tools/test_build_guard.sh
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

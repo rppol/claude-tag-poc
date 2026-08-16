@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>claude-tag-poc — a multi-agent chat teammate</title>
-<meta name="description" content="A simulated multi-agent system behind an @mention: routing, scoped memory, MCP tools, A2A delegation, Grafana and escalation integration, sized for 100 users.">
+<meta name="description" content="An inspectable simulation of a multi-agent system behind an @mention: real prompts, real tool schemas, a real mechanical verifier, an orchestrator/planner/critic debate, scoped memory, MCP and A2A.">
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -17,7 +17,7 @@
     <button role="tab" id="tab-arch" aria-controls="view-arch" aria-selected="false">Architecture</button>
     <button role="tab" id="tab-plan" aria-controls="view-plan" aria-selected="false">Rollout&nbsp;plan</button>
   </nav>
-  <span class="badge">Simulated · no backend, no keys, no model</span>
+  <span class="badge">No model runs here · every span says which parts were computed</span>
 </header>
 
 <!-- ══════════════════════ SIMULATOR ══════════════════════ -->
@@ -47,28 +47,35 @@
       <div class="faces" id="faces"></div>
     </div>
     <div class="msgs" id="msgs"></div>
+
     <div class="composer">
       <form class="box" id="form">
         <label for="input" class="sr-only">Message</label>
         <div class="box-in">
-          <input id="input" autocomplete="off" placeholder="Message #incidents — mention @Claude to start a run">
-          <div class="box-tools" aria-hidden="true"><span><b>B</b></span><span><i>i</i></span><span>‹›</span><span>☺</span></div>
+          <input id="input" autocomplete="off" placeholder="Ask anything — the tier predicate evaluates as you type">
+          <div class="box-tools">
+            <label class="inc"><input type="checkbox" id="incToggle"> incident open in this channel</label>
+          </div>
         </div>
         <button type="submit" class="send" aria-label="Send">Send</button>
       </form>
+      <div class="tier-live" id="tierLive" hidden></div>
     </div>
+
     <div class="scenarios">
-      <span class="sc-label">Scenarios</span>
-      <p class="legend"><b>What is real:</b> the ack seam, the queue and its dedupe, the lease
-      and retry ceiling are implemented and tested in the repo. Memory, MCP, A2A, LangGraph and
-      ambient are <b>designed and drawn here, not built</b> — each scenario says which it is.
-      Latencies, token counts and IDs below are illustrative, not measurements.</p>
+      <span class="sc-label">Flows</span>
+      <p class="legend"><b>Read this first.</b> The tier decision, every tool call and its schema
+      check, the retrieval ranking and scores, the debate's termination, the token budgets and the
+      verifier are <b>executed in your browser when you press play</b>. The only fixture is what a
+      model would say — a static page holds no API key. Every span is labelled, and the ledger at
+      the bottom of the run panel counts them for you.</p>
       <div class="sc-grid" id="scenarios"></div>
     </div>
   </section>
 
   <aside class="runtime">
     <div class="rt-head"><b>Runtime</b><span id="rtState">idle</span></div>
+
     <section class="rt-sec">
       <h2>Ingress <em>3s ack budget</em></h2>
       <div class="ingress">
@@ -76,16 +83,34 @@
         <div class="meter"><i id="ackBar"></i></div>
       </div>
     </section>
+
     <section class="rt-sec">
-      <h2>LangGraph <em>state graph</em></h2>
+      <h2>Orchestrator <em>tier predicate</em></h2>
       <ul class="lanes" id="lanes"></ul>
-      <div class="ckpt" id="ckpt">checkpoint <b>—</b></div>
+      <div class="ckpt" id="ckpt">flow <b>—</b></div>
     </section>
-    <section class="rt-sec">
-      <h2>LangSmith <em>run tree</em></h2>
+
+    <section class="rt-sec trace-sec">
+      <h2>Run tree <em>every span opens</em></h2>
       <div class="tstats" id="tstats"></div>
-      <div class="trace" id="trace" aria-live="polite"></div>
-      <div class="empty" id="traceEmpty">Nothing running. Pick a scenario, or mention @Claude.</div>
+      <div class="trace" id="trace"></div>
+      <div class="empty" id="traceEmpty">Nothing running. Pick a flow, or type a question below the chat.</div>
+    </section>
+
+    <section class="rt-sec" id="sandbox" hidden>
+      <h2>Verify it yourself <em>runs on your text</em></h2>
+      <p class="sb-note">This is the real verifier, checking against the real evidence corpus this
+      run produced. Change a number, invent a service name, or add "X caused Y" without a hedge —
+      it will reject it and tell you which token failed.</p>
+      <label for="sbText" class="sr-only">Draft to verify</label>
+      <textarea id="sbText" rows="6" spellcheck="false"></textarea>
+      <div class="sb-verdict" id="sbVerdict"></div>
+      <div id="sbTable"></div>
+    </section>
+
+    <section class="rt-sec">
+      <h2>Fixture ledger <em>what was pre-written</em></h2>
+      <div id="ledger" class="ledger"><p class="lg-note">Run a flow to see the count.</p></div>
     </section>
   </aside>
 
@@ -104,43 +129,64 @@
 
     <section class="arch-sec">
       <h2>How to read these diagrams</h2>
-      <p class="sec-note">Every diagram on this page uses the same three shapes, so what exists
-      and what is proposed can be told apart at a glance rather than from a caption.</p>
-      <figure class="figure"><img class="diagram" src="diagrams/legend.svg" alt="Legend: a solid teal node means implemented and tested in the repo; a dashed violet node means designed only, drawn here but not built; an amber node means a service outside our boundary."></figure>
+      <p class="sec-note">Every diagram uses the same three shapes, so what exists and what is
+      proposed can be told apart at a glance rather than from a caption.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/legend.svg" alt="Legend: a solid teal node means implemented and tested in the repo; a dashed violet node means designed only; an amber node means a service outside our boundary."></figure>
     </section>
 
     <section class="arch-sec">
       <h2>Data flow</h2>
       <p class="sec-note">One mention, end to end. Everything below <code>ack</code> happens after the platform has already been told <code>200 OK</code>.</p>
-      <figure class="figure"><img class="diagram" src="diagrams/flow.svg" alt="Data flow: a mention enters the listener, is acked within 3 seconds and written to a queue, then a worker drives Router, Librarian, Planner, Executor, Reviewer and Scribe before posting back to the thread."></figure>
+      <figure class="figure"><img class="diagram" src="diagrams/flow.svg" alt="Data flow: a mention enters the listener, is acked within 3 seconds and written to a queue, then a worker drives the orchestrator, librarian, agent, writer, verifier and scribe before posting back to the thread."></figure>
     </section>
 
     <section class="arch-sec">
-      <h2>Who does what</h2>
-      <p class="sec-note">Each agent owns exactly one decision. An agent that owns two decisions is two agents that have not been separated yet.</p>
-      <div class="agents" id="agentCards"></div>
-    </section>
-
-    <section class="arch-sec">
-      <h2>Orchestration is a graph, not a script</h2>
-      <p class="sec-note">Five nodes, not nine. Planning and executing were separate until it became clear that is the model's own tool-calling loop, hand-rolled with worse adaptivity — LangGraph is here for the checkpointer and <code>interrupt()</code>, not for node count. The crash-and-resume behaviour is the checkpointer. The tool-approval gate is an interrupt. Neither is bespoke machinery here.</p>
-      <figure class="figure"><img class="diagram" src="diagrams/langgraph.svg" alt="LangGraph state graph: a mention enters the queue, the librarian assembles scoped context, and one agent node runs a tool-calling loop, interrupting to a human gate for write tools while the run parks in a waiting state. A writer produces the draft, a mechanical verifier checks every number and name against evidence and returns it to the writer if unsupported, then the reply is posted and the scribe writes memory."></figure>
+      <h2>Three tiers, not one pipeline</h2>
+      <p class="sec-note">A prior review of this repo collapsed nine nodes to five and deleted the
+      planner/critic split, on the grounds that it hand-rolls the model's own loop with worse
+      adaptivity. That finding is not reversed here — <b>it is the default</b>. Debate is the
+      escalation, and it engages only where the mechanical verifier is structurally blind.</p>
+      <div class="tiers" id="tierCards"></div>
+      <figure class="figure"><img class="diagram" src="diagrams/tiers.svg" alt="The orchestrator's tier predicate: a causal question, an active incident, a non-auto tool or a prior verifier failure route to T2 debate; a short question with no tool hint routes to T0; everything else is T1."></figure>
       <div class="callout">
-        <b>The retry ceiling and the graph checkpoint are the same idea at two altitudes.</b>
-        <p>The queue guarantees a run is attempted; the checkpointer guarantees an attempt resumes where it stopped rather than from the top. Without the second one, a crash in <code>reviewer</code> re-runs every tool call before it — which is slow, expensive, and in the case of a write tool, wrong.</p>
+        <b>The trigger conditions are the exact complement of what the verifier can check.</b>
+        <p>The verifier checks tokens, so it is blind to <em>causation</em> — therefore a causal
+        question escalates. The verifier checks what is <em>said</em>, never what is <em>done</em>,
+        so it is blind to writes — therefore a non-auto tool escalates. That is a boundary, not a
+        heuristic, and it is why the predicate is code rather than a model call.</p>
       </div>
     </section>
 
     <section class="arch-sec">
-      <h2>If it isn't traced, it didn't happen</h2>
-      <p class="sec-note">LangSmith turns each run into a tree of spans with latency, tokens and status. That is the difference between "the bot said something odd" and "the librarian returned four memories, two of which were stale, and the planner anchored on the wrong one".</p>
-      <figure class="figure"><img class="diagram" src="diagrams/trace.svg" alt="A LangSmith run tree for one graph invocation, showing per-node spans with latency and token counts, nested tool calls, a reviewer verdict of revise, and a feedback loop into a graded eval dataset."></figure>
+      <h2>The roster</h2>
+      <p class="sec-note">Each agent owns exactly one decision. Open any card for the full system
+      prompt it is sent — these are the same strings the simulator assembles, read from the same
+      array, because the previous version of this page documented one roster while animating
+      another.</p>
+      <div class="agents" id="agentCards"></div>
     </section>
 
     <section class="arch-sec">
-      <h2>The turn, as a conversation between agents</h2>
-      <p class="sec-note">The agent adapts one tool call at a time; the verifier is a mechanical gate, not a second opinion.</p>
-      <figure class="figure"><img class="diagram" src="diagrams/turn.svg" alt="Sequence diagram of one turn: Router classifies, Librarian gathers scoped context, Planner fans out to Executor and an A2A analyst, Reviewer gates the draft, Scribe writes memory."></figure>
+      <h2>The debate protocol</h2>
+      <p class="sec-note">A debate with no termination proof is a bug, and a critic that sees what
+      the planner saw is the rubber stamp this design already deleted once.</p>
+      <div id="debateSpec"></div>
+      <figure class="figure"><img class="diagram" src="diagrams/debate.svg" alt="Debate state machine: planner proposes, the runtime raises a mechanical objection on an empty alternatives list, the critic attacks with its own tool budget, uncited contradictions are discarded, and five independent bounds terminate the loop into accept, downgrade or human gate."></figure>
+    </section>
+
+    <section class="arch-sec">
+      <h2>The verifier</h2>
+      <p class="sec-note">The one place a second model was replaced by forty-five lines of code,
+      because a model reading the same context inherits the first one's misreadings.</p>
+      <figure class="figure"><img class="diagram" src="diagrams/verifier.svg" alt="The verifier extracts numbers, timestamps, versions, identifiers and handles from the draft, normalises them, and set-differences them against the same classes extracted from tool results and the transcript; anything left over sends the draft back to the writer once."></figure>
+      <div class="callout">
+        <b>It advertises its own biggest hole.</b>
+        <p>Right tokens, wrong relationship: if the evidence says <code>41/s at 15:01</code> and the
+        draft says <code>41/s at 14:01</code>, both tokens are present and the pairing is invented.
+        That passes. Fixing it needs span-level evidence binding, which is not forty-five lines. A
+        verifier that claims completeness is the falsely-verified-code failure this repo has already
+        hit four times.</p>
+      </div>
     </section>
 
     <section class="arch-sec">
@@ -149,15 +195,40 @@
       <figure class="figure"><img class="diagram" src="diagrams/memory.svg" alt="Memory retrieval: the channel binding resolves to an identity scope, which is applied inside the vector query predicate before ranking, never after."></figure>
       <div class="callout">
         <b>The scope filter belongs in the query predicate, never after retrieval.</b>
-        <p>Post-filtering leaks through result counts, ranking behaviour and latency, and it sits one refactor away from being deleted by someone who reads it as a redundant guard. Scope is derived from the inbound event's channel binding — never from anything in the request body, because in a public channel the request body is attacker-controlled.</p>
+        <p>Post-filtering leaks through result counts, ranking behaviour and latency, and it sits one
+        refactor away from being deleted by someone who reads it as a redundant guard. Scope is
+        derived from the inbound event's channel binding — never from anything in the request body,
+        because in a public channel the request body is attacker-controlled. Run the
+        <b>Scope boundary</b> flow: the excluded count is shown, and the hits are absent from the
+        result set rather than removed from it.</p>
+      </div>
+    </section>
+
+    <section class="arch-sec">
+      <h2>The MCP catalogue</h2>
+      <p class="sec-note">This is the live table the simulator dispatches against. A schema or clamp
+      you can read here is one that actually rejects when you run a flow.</p>
+      <div class="tools" id="toolTable"></div>
+      <div class="callout">
+        <b>There is no <code>slack.post_message</code>, and that is the most important row in the table.</b>
+        <p>Posting is a graph edge that runs after the verifier and is fenced by
+        <code>db.reserve_post()</code>. As a tool it would hand the agent a path around the verifier,
+        and a gate that can be bypassed is not a gate. <code>tools/check_registry.js</code> fails the
+        build if the tool ever appears — along with any irreversible write whose policy is
+        <code>auto</code>.</p>
       </div>
     </section>
 
     <section class="arch-sec">
       <h2>Reaching a tool vs. reaching an agent</h2>
-      <p class="sec-note">Two problems that look alike and are not. MCP is a typed call into a capability you own. A2A is a task handed to something with its own goals, its own model and its own lifecycle.</p>
+      <p class="sec-note">Two problems that look alike and are not.</p>
       <div class="proto" id="protoCards"></div>
       <figure class="figure"><img class="diagram" src="diagrams/proto.svg" alt="MCP is a typed synchronous call to a tool server behind a policy gate; A2A is an asynchronous task handed to an external agent with its own lifecycle."></figure>
+      <h3 class="sub-h">The agent card, in full</h3>
+      <p class="sec-note">One card, not two. A second is an abstraction with one implementation's
+      worth of value — the condition for adding one is a domain owned by another team whose
+      credentials must not be shared with ours, which is a trust boundary rather than just async.</p>
+      <div id="cardJson"></div>
     </section>
 
     <section class="arch-sec">
@@ -211,7 +282,8 @@
 
     <section class="arch-sec">
       <h2>Review pass</h2>
-      <p class="sec-note">The Reviewer agent's job, applied to the plan itself. Ordered by what would actually stop a rollout.</p>
+      <p class="sec-note">Ordered by what would actually stop a rollout. The first row is a defect in
+      the shipped code, not a note.</p>
       <div class="review" id="reviewTable"></div>
     </section>
 
@@ -219,10 +291,15 @@
 </div>
 
 <footer class="foot">
-  <span>Simulation only — no model runs here and no key is held. The scenarios illustrate a designed system; they are not a recording of one that ran.</span>
+  <span>Simulation only — no model runs here and no key is held. The model's words are fixtures; the machinery around them executes.</span>
   <a href="https://github.com/rppol/claude-tag-poc">Source</a>
 </footer>
 
+<!-- Load order matters: plain globals, no modules, so file:// still works. -->
+<script src="tools.js" defer></script>
+<script src="agents.js" defer></script>
+<script src="runtime.js" defer></script>
+<script src="flows.js" defer></script>
 <script src="sim.js" defer></script>
 </body>
 </html>

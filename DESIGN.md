@@ -264,3 +264,111 @@ minute and silently truncates the thread window. No schema change addresses
 that, and the `runs` table has no workspace column, so two tenants cannot be
 represented even in principle. Decide the licensing path before writing a
 `tenant_id`.
+
+
+---
+
+## 9 · The agent layer
+
+### Tiers, and the honest resolution of a contradiction
+
+§4 of an earlier review here collapsed nine graph nodes to five and deleted the
+planner/executor split — that split hand-rolls the model's own tool loop with worse
+adaptivity — and deleted an LLM reviewer, because a second model reading the same context
+inherits the first one's misreadings.
+
+The system now has an Orchestrator, a Planner and a Critic. That looks like a reversal. It
+is not, and the difference is worth stating precisely, because "we added the thing we
+deleted" is the shape of a design losing its argument.
+
+**The five-node design is the default.** It is tier T1, and it is what the overwhelming
+majority of runs take. Debate is tier T2, an escalation, and the two additions each answer
+the specific objection that killed their predecessor:
+
+| Deleted | Objection | What replaced it |
+|---|---|---|
+| Router | An `@mention` already carries an intent a human chose; and its drop edge answered with silence. | The Orchestrator owns a *different* decision — how much machinery — and has **no drop edge**. Every input exits to a tier. It is also pure code, because an orchestrator that needed a large model to pick a tier would recreate the cost it exists to avoid. |
+| Reviewer | A second large model reading the same context confirms the first one's misreadings. | The Critic never sees the Planner's reasoning — only the proposal object — and holds its own budget of two tool calls, so it can *check* rather than only argue. Asymmetric information, or no debate. |
+
+**The trigger conditions are the exact complement of what the verifier can check.** The
+verifier checks tokens, so it is blind to causation — a causal question escalates. It
+checks what is *said*, never what is *done*, so it is blind to writes — a non-`auto` tool
+escalates. That is a boundary rather than a heuristic, which is why the predicate is
+twelve lines of code you can read in the UI.
+
+**What would falsify it.** Ship three measurements with the feature or the debate is
+unfalsifiable: `debate_flip_rate` (below 10% over 50 runs, demote it), `flip_regret` (above
+30%, the critic is actively harmful), and `critic_ablation_delta` — run the debate,
+discard the critic's output, blind-compare. That last one is the only measurement that
+separates "the critic improved it" from "a second pass improved it."
+
+### Debate does not fit the current lease. That is a defect, not a note.
+
+`test_worker.py::test_lease_outlives_the_worst_case_run` pins:
+
+```
+len(MODELS) * MODEL_TIMEOUT + 60 < LEASE_SECONDS     # 4×30 + 60 = 180 < 300  ✓
+```
+
+A worst-case T2 run is eight model calls — librarian, planner ×2, critic ×2, writer,
+scribe, and a rewrite. Bounding each to a single attempt: **8 × 30 + 60 = 300, which is
+not < 300.**
+
+This is the same class of bug already caught here once, where a 120s lease against a 360s
+worst case put two identical answers into a public channel. It would ship again with a
+bigger blast radius.
+
+The precondition, to land in the same commit that builds debate: give the debate its own
+wall-clock budget (`DEBATE.wallMs = 90_000`, already in the registry) rather than letting
+it inherit the run's, raise `LEASE_SECONDS` to 600, and update the test's formula to
+`librarian + debate_wall + writer + scribe`. Raising the lease alone is worse — the lease
+also bounds how long a crashed run stays invisible, and fifteen minutes of silence in an
+incident channel is its own failure.
+
+### The verifier replaced a model with forty-five lines
+
+It extracts every timestamp, version, unit-bearing number, backticked or dotted identifier
+and @-handle from the draft, normalises them, and set-differences them against the same
+classes extracted from tool results, the transcript and the retrieved memories.
+
+Three decisions in it are load-bearing:
+
+**The corpus excludes the model's own prior turns and the system prompts.** A draft cannot
+be its own evidence. That single exclusion is what separates a verifier from a rubber
+stamp.
+
+**The near-match is restricted to measurements.** Evidence of `41.2` supports a draft that
+says `41`, because without that, correct rounding is rejected and the writer learns to
+route around the verifier. But it must never touch a timestamp: `parseFloat("14:55")` is
+`14`, so an unrestricted near-match let an evidence value of `14:10` support an invented
+`14:55`. I found that by typing a forged draft into the page's own verifier sandbox, which
+is the argument for shipping the sandbox.
+
+**Causation is constrained by form, since it cannot be checked by content.** A causal
+connective must share its sentence with a hedge. You cannot mechanically verify that X
+caused Y; you can mechanically verify that the sentence did not claim it flatly.
+
+Its biggest hole is a false negative and is stated in the UI: right tokens, wrong pairing.
+Evidence says `41/s at 15:01`, the draft says `41/s at 14:01` — both tokens present, the
+relationship invented, and it passes. Fixing it needs span-level evidence binding, which is
+not forty-five lines. A verifier that claimed completeness would be the
+falsely-verified-code failure this repo has already hit four times.
+
+### What makes the simulator a simulation rather than a slideshow
+
+Computed in the browser, on every run: the tier predicate, the graph's control flow, JSON
+Schema validation of every tool argument, the clamps, the allowlist as set membership, the
+scope predicate as a filter applied before ranking, the retrieval scores as a TF-IDF
+cosine, the token accounting measured off the assembled prompt strings, the debate's round
+and budget ceilings, and the verifier.
+
+A fixture, necessarily: what a model would emit. A static page holds no key.
+
+The seam is exposed rather than asserted — a badge per span, a ledger that counts them, and
+a textarea that runs the real verifier against the real evidence corpus on text the reader
+types. A page that rejects a number *you* invented is not a replay.
+
+`tools/check_registry.js` closes the loop the other way: it asserts that every hand-written
+model fixture survives the real verifier against its own evidence. A fixture that cannot is
+a lie about the system, which is the "test that passes against broken code" failure
+relocated into content. It caught eight of mine on its first run.

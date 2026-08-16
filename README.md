@@ -21,9 +21,18 @@ the same size, and every surface says which is which.
 | Durable queue: claim, lease, reclaim after a crash | **in the repo**, tested |
 | Bounded retry with backoff, no duplicate posts | **in the repo**, tested |
 | One model call, failover across free models | **in the repo**, tested |
-| Multi-agent graph, scoped memory, MCP, A2A, ambient | **designed only** — drawn, not built |
+| Multi-agent graph, scoped memory, MCP, A2A, ambient | **designed only** — but *executed* in the simulator |
 
-The simulator tags every scenario `in the repo` / `partly built` / `design only`.
+The last row needs a word. It is designed rather than deployed — there is no Slack
+workspace behind it and no model call. But it is not a slideshow: the agent registry, the
+MCP catalogue with its JSON Schemas and clamps, the scope predicate, the debate's
+termination bounds and the mechanical verifier are **real code that runs in your browser**.
+The only fixture is what a model would say, because a static page holds no API key.
+
+Every span in the simulator carries a `computed` / `mixed` / `fixture` badge, and the run
+panel counts them for you rather than asking you to infer it.
+
+The simulator tags every flow `in the repo` / `partly built` / `design only`.
 `tools/run_scenarios.py` exercises only the first four rows, and says so in its own output.
 
 ---
@@ -64,8 +73,17 @@ Two consequences worth naming:
 **Checks** — no dependencies, no credentials, no network:
 
 ```bash
-python3 test_worker.py                  # 25 checks
+python3 test_worker.py                  # 25 checks — queue, lease, retry, transcript
+node tools/check_registry.js            # 59 checks — agents, tools, flows, verifier
 ```
+
+The second one is the interesting half. It runs every flow headlessly and asserts that the
+registry the architecture tab documents is the registry the simulator executes; that no
+irreversible write tool is `auto`; that `slack.post_message` does not exist; that every
+agent is reachable from some flow and no flow names an agent that is not in the registry;
+and that **every hand-written model fixture survives the real verifier against its own
+evidence**. That last one caught eight of my own fixtures making claims their evidence did
+not support.
 
 **Scenarios** — the real backend against a live free model:
 
@@ -170,8 +188,13 @@ the Slack half needs a workspace and a bot token.
 | `test_worker.py` | 25 checks. No framework, no network. |
 | `tools/eval.py` | Grades the *answers*. `--falsify` proves the grading can fail. |
 | `tools/run_scenarios.py` | The real backend through manufactured threads, live model. |
-| `docs/` | The simulator: `index.html`, `sim.js`, `style.css`, `diagrams/*.mmd`. |
-| `tools/build.sh` | Renders diagrams, self-hosts fonts, assembles `_site/`. |
+| `docs/agents.js` | The agent registry. Full system prompt text, allowlists, budgets, tiers. |
+| `docs/tools.js` | The world, the MCP catalogue with real JSON Schema and clamps, the A2A cards. |
+| `docs/runtime.js` | The run engine: prompt assembly, dispatch, retrieval ranking, debate, verifier. |
+| `docs/flows.js` | Nine flows. Each is an *input*, not a script. |
+| `docs/sim.js` | Renders. Decides nothing. |
+| `tools/check_registry.js` | The check that stops the registry and the docs from diverging. |
+| `tools/build.sh` · `guard.sh` | Renders diagrams, self-hosts fonts, proves nothing is fetched. |
 
 **[DESIGN.md](./DESIGN.md)** covers why it is shaped this way and what was deliberately left out.
 

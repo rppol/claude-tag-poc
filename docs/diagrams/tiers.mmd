@@ -1,0 +1,25 @@
+flowchart TB
+  IN(["@Claude mentioned"]) --> P{"tier predicate<br/><small>pure code — no model call</small>"}
+
+  P -->|"retryReason == VERIFY_FAIL"| T2
+  P -->|"channel.incidentActive"| T2
+  P -->|"CAUSAL.test(question)"| T2["<b>T2 · debate</b><br/><small>librarian → planner ⇄ critic<br/>→ writer → verifier → scribe</small>"]
+  P -->|"no tool hint<br/>and < 160 chars"| T0["<b>T0 · direct</b><br/><small>librarian → writer → verifier</small>"]
+  P -->|"otherwise"| T1["<b>T1 · fast</b><br/><small>librarian → agent loop → writer<br/>→ verifier → scribe</small>"]
+
+  T1 -.->|"Gate B: a proposed tool<br/>whose policy is not auto"| T2
+
+  T0 --> POST(["post to thread"])
+  T1 --> POST
+  T2 --> POST
+
+  NOTE["<small>The predicate has <b>no drop edge</b>.<br/>Every input exits to some tier —<br/>which is why this is not the Router<br/>an earlier review deleted for<br/>answering with silence.</small>"]
+
+  classDef mech stroke:#EDAE55,fill:#33281A,color:#F0DEC0
+  classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
+  classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
+  classDef note fill:none,stroke:none,color:#8B7FA0
+  class P mech
+  class T0,T1,T2 design
+  class IN,POST built
+  class NOTE note
