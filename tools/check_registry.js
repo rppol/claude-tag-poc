@@ -144,6 +144,72 @@ const dropped = FLOW.nocon._spans.filter(s => s.kind === "gate" && s.dropped?.le
 ok(dropped.length > 0, "an uncited 'contradicted' objection was discarded before the planner saw it");
 ok(FLOW.nocon._spans.some(s => s.label === "tie-break"), "non-convergence routes to a tie-break, not to a planner win");
 
+console.log("\ninvariants a refactor could silently undo");
+// Each of these was verified to survive deliberate mutation before being
+// written — a check that cannot fail is worse than no check.
+{
+  const f = FLOWS.find(x => x.id === "debate");
+  const spans = f._spans;
+
+  // 1 · the round ceiling is a constant, not "however many rounds a flow supplies"
+  const many = [];
+  for (let i = 0; i < 6; i++) many.push({ proposal: '{"claim":"c","alternatives_considered":[{"h":1},{"h":2}]}',
+    attack: '{"objections":[{"id":"o","target":"claim","kind":"unsupported","severity":"high","cites":"ev_1"}],"verdict":"revise"}' });
+  const probe = new Run(FLOWS[0], () => {});
+  const out = probe.debate("q", { memories: [], entities: [] }, many);
+  ok(out.rounds.length <= DEBATE.maxRounds,
+     `a flow supplying 6 rounds is cut at maxRounds (ran ${out.rounds.length})`);
+
+  // 2 · the asymmetry IS the debate's justification. If the critic ever sees the
+  //     planner's carried reasoning, this is the LLM reviewer that was deleted.
+  const criticTurns = spans.filter(s => s.agent === "critic" && s.kind === "model").map(s => s.user);
+  ok(!AGENT.critic.userTemplate.includes("{critique}"),
+     "the critic's template has no slot for the planner's reasoning");
+  ok(criticTurns.every(u => !u.includes("SURVIVING OBJECTIONS")),
+     "and no critic turn carries it in practice");
+
+  // 3 · a draft cannot be its own evidence. This one line is what separates the
+  //     verifier from a rubber stamp, and nothing pinned it.
+  const rt2 = new Run(f, () => {});
+  f.run(rt2);
+  const outputs = spans.filter(s => s.kind === "model").map(s => s.output);
+  ok(outputs.every(o => !rt2.evidence.includes(o)),
+     "no model output is in the evidence corpus");
+  ok(!rt2.evidence.some(e => String(e).includes("YOUR ROLE")),
+     "and no system prompt is either");
+}
+
+// 4 · the catalogue must not rot the way the roster did
+{
+  const used = new Set();
+  for (const f of FLOWS) for (const s of f._spans)
+    if (s.kind === "tool" || s.kind === "vector") used.add(s.label);
+  const cold = TOOLS.map(t => `${t.server}.${t.name}`).filter(n => !used.has(n));
+  ok(cold.length === 0, "every catalogued tool is exercised by some flow", cold.join(", "));
+}
+
+// 5 · a unit swap is the highest-consequence miss available in an incident
+ok(!verify("p99 is 1450 s.", ['{"unit":"ms"}', "1450ms"]).pass,
+   "evidence of 1450ms does not support a draft saying 1450 s");
+ok(verify("p99 is 1450 ms.", ['{"unit":"ms"}', "1450ms"]).pass,
+   "but the same unit does");
+ok(!verify("hit ratio is 94x.", ["94%"]).pass, "94% does not support 94x");
+
+// 6 · the literal fallback was unanchored: `main` passed against "domain"
+ok(!verify("base is `main`.", ["the domain was unrelated"]).pass,
+   "a backticked identifier does not match inside a longer word");
+
+// 7 · the shape check must cover the phrasings an incident actually uses
+for (const p of ["The root cause is the retry config.", "The deploy is responsible for the outage.", "The deploy triggered the outage."])
+  ok(!verify(p, [p.toLowerCase()]).pass, `unhedged: "${p.slice(0, 34)}…"`);
+
+// 8 · the derivation chain is the point of the page
+{
+  const w = FLOWS.flatMap(f => f._spans.filter(s => s.agent === "writer"));
+  ok(w.every(s => s.because), `all ${w.length} writer spans say why they wrote what they wrote`,
+     w.filter(s => !s.because).length + " missing");
+}
+
 console.log("\nA2A earns its card");
 const a2a = FLOW.a2a._spans.filter(s => s.kind === "a2a");
 ok(a2a.some(s => s.state === "input-required"), "the specialist asks US something — an MCP call has no state to return to");
@@ -152,7 +218,20 @@ ok(A2A_CARDS.every(c => c.skills.length && c.url && c.securitySchemes), "the car
 
 console.log("\ntiers");
 ok(FLOW.direct._spans[0].head.startsWith("T0"), "a short factual question routes T0");
-ok(FLOW.fast._spans[0].head.startsWith("T2"), "an active incident routes T2 by channel state");
+// This slot used to assert "an active incident routes T2 by channel state" —
+// and it was PROTECTING a contradiction: fast and reject were routed T2, the
+// runtime panel painted the six-node debate path beside them, and neither ran
+// a planner or a critic. Sixth occurrence of this repo's signature failure.
+// What belongs here is the consistency itself.
+for (const f of FLOWS) {
+  const route = f._spans.find(s => s.kind === "route");
+  const debates = f._spans.some(s => s.label === "debate control");
+  const escalated = f._spans.some(s => s.label === "Gate B");
+  const t2 = route && route.head.startsWith("T2");
+  ok(t2 === debates || (escalated && debates),
+     `${f.id}: routed ${route ? route.head.split(" ")[0] : "—"} and ${debates ? "debates" : "does not debate"}`,
+     "the tier lane and the executed run disagree");
+}
 ok(tierFor({ question: "why did checkout break", toolHints: [], incidentActive: false }).tier === "T2",
    "a causal question routes T2 on wording alone");
 ok(tierFor({ question: "what version is checkout on", toolHints: [], incidentActive: false }).tier === "T0",

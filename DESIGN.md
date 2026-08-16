@@ -290,6 +290,15 @@ the specific objection that killed their predecessor:
 | Router | An `@mention` already carries an intent a human chose; and its drop edge answered with silence. | The Orchestrator owns a *different* decision — how much machinery — and has **no drop edge**. Every input exits to a tier. It is also pure code, because an orchestrator that needed a large model to pick a tier would recreate the cost it exists to avoid. |
 | Reviewer | A second large model reading the same context confirms the first one's misreadings. | The Critic never sees the Planner's reasoning — only the proposal object — and holds its own budget of two tool calls, so it can *check* rather than only argue. Asymmetric information, or no debate. |
 
+An `incidentActive` gate sat in that predicate at first, justified as "stakes are
+pinned by channel state". A review deleted it, and the reason is worth keeping: it was
+the only condition not in the complement below, and because the demo's primary channel
+always has an incident open, it made T2 universal exactly where the feature matters —
+so the claim that the five-node path is the default was false in practice. The review
+caught the runtime panel painting the six-node debate path beside a trace containing no
+planner and no critic: the same roster-drift bug this design exists to prevent, in a new
+form. A check now asserts that a flow's routed tier and its executed path agree.
+
 **The trigger conditions are the exact complement of what the verifier can check.** The
 verifier checks tokens, so it is blind to causation — a causal question escalates. It
 checks what is *said*, never what is *done*, so it is blind to writes — a non-`auto` tool

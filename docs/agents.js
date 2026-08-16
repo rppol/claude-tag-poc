@@ -38,9 +38,19 @@ const TIERS = [
    DONE, so it is blind to writes → a non-auto tool routes to debate. */
 const CAUSAL = /\b(why|root cause|caused|because|correlat|same (issue|cause|thing|root)|related to|blame|due to)\b/i;
 
+/* An `incidentActive` gate used to sit second in this chain, justified as
+   "stakes are pinned by channel state". It was removed, for a reason worth
+   recording rather than quietly deleting:
+
+   It was the only condition here that is NOT in the complement of what the
+   verifier can check. The other three are — causation and writes are precisely
+   its blind spots. And because the demo's primary channel always has an
+   incident open, it made T2 universal exactly where the feature matters,
+   which made this file's own claim that the five-node path is the default
+   false in practice. A review caught the runtime panel painting the six-node
+   debate path next to a trace containing no planner and no critic. */
 function tierFor(ctx) {
-  if (ctx.retryReason === "VERIFY_FAIL")  return { tier: "T2", rule: 'retryReason === "VERIFY_FAIL"', note: "the writer already failed the mechanical check once" };
-  if (ctx.incidentActive)                 return { tier: "T2", rule: "channel.incidentActive === true", note: "stakes are pinned by channel state, not by wording" };
+  if (ctx.retryReason === "VERIFY_FAIL")  return { tier: "T2", rule: 'retryReason === "VERIFY_FAIL"', note: "the writer already failed the mechanical check once, so the second pass gets an adversary" };
   if (CAUSAL.test(ctx.question))          return { tier: "T2", rule: `CAUSAL.test(question) === true`, note: "a causal claim is exactly what the verifier cannot check" };
   if (!ctx.toolHints?.length && ctx.question.length < 160)
                                           return { tier: "T0", rule: "no tool hints && question.length < 160", note: "the thread already contains the answer" };

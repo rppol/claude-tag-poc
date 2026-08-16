@@ -513,3 +513,67 @@ details.ag-card>:last-child{margin-bottom:16px}
 .hit p{margin:5px 0 4px;font-size:11.5px;line-height:1.5;color:var(--mono)}
 .hit-m{font-family:var(--code);font-size:9.5px;color:var(--mono-quiet)}
 .hit-m code{background:var(--ink-3);padding:0 3px;border-radius:3px;color:var(--mono-dim)}
+
+/* ── flow picker ───────────────────────────────────────────
+   Nine flows are the primary control on this page, and five of them were
+   below the fold inside a scroll region nobody would find. Two tight lines
+   per card instead of a wrapping paragraph, and the justification prose
+   moved behind a disclosure. */
+.sc-top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.scenarios{max-height:none;overflow:visible;padding:9px 20px 12px}
+.sc-grid{grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:6px;margin-top:7px}
+.sc{padding:6px 9px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.sc-n{display:flex;align-items:baseline;gap:6px;min-width:0}
+.sc-n b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc .chip{margin-left:auto;flex:none}
+.sc-d{font-size:11px;color:var(--dim);line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+details.legend{margin:0}
+details.legend>summary{cursor:pointer;font-size:11.5px;color:var(--dim);list-style:none;
+  display:inline-flex;align-items:center;gap:5px}
+details.legend>summary::-webkit-details-marker{display:none}
+details.legend>summary::before{content:"›";color:var(--plum);font-weight:700;
+  display:inline-block;transition:transform .15s}
+details.legend[open]>summary::before{transform:rotate(90deg)}
+details.legend>summary:hover{color:var(--text)}
+details.legend p{margin:7px 0 0;font-size:11.5px;color:var(--dim);line-height:1.5;max-width:78ch}
+details.legend p b{font-family:var(--body);font-weight:600;color:var(--text)}
+/* .sc b was display:block from the old card layout, which pushed the chip onto
+   its own line inside the new flex header row. */
+.sc-n b{display:inline}
+.sc{gap:2px}
+
+/* ── run-tree summary: the identifier is not the truncatable half ──────────
+   `.ag` held the flexible 1fr track while `.hd` was auto, so the head won all
+   the space and the agent/tool name rendered at 0px. The run tree answered
+   "what tool was used?" with an empty cell. The head is what may ellipsis. */
+.span>summary{grid-template-columns:22px 44px auto minmax(0,1fr) auto auto}
+.span .ag{overflow:visible;text-overflow:clip;white-space:nowrap}
+.span .hd{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The badge carries the whole honesty argument; 8.5px was below any legibility
+   floor for something load-bearing. */
+.span .pv{font-size:9.5px}
+.span .kd{font-size:9px}
+
+/* ── the verifier table was 433px inside a 363px panel with no scroller, so
+      the evidence column — the entire proof of grounding — sat 62px
+      off-screen and unreachable. */
+.sbody{overflow-x:auto}
+#sbTable{overflow-x:auto}
+.vtab .src{white-space:normal;max-width:none}
+
+/* ── the shared preamble is 923 of every prompt's characters and identical
+      across agents; collapsed so the role-specific part is what you meet. */
+.pre-fold{border:1px solid var(--ink-3);border-radius:7px;background:var(--ink);overflow:hidden}
+.pre-fold>summary{padding:4px 8px;background:var(--ink-3);cursor:pointer;list-style:none;
+  font-family:var(--code);font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--mono-quiet)}
+.pre-fold>summary::-webkit-details-marker{display:none}
+.pre-fold>summary:hover{color:var(--mono)}
+.pre-fold pre{margin:0;padding:8px;font-family:var(--code);font-size:10.5px;line-height:1.6;
+  color:var(--mono-dim);white-space:pre-wrap;word-break:break-word;max-height:240px;overflow-y:auto}
+
+/* Grid items stretch to their row's tallest sibling by default, so opening one
+   agent card inflated the two beside it into tall empty boxes. Cards are
+   collapsible, so they must size to their own content. */
+.agents{align-items:start}

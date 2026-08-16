@@ -54,7 +54,7 @@
         <div class="box-in">
           <input id="input" autocomplete="off" placeholder="Ask anything — the tier predicate evaluates as you type">
           <div class="box-tools">
-            <label class="inc"><input type="checkbox" id="incToggle"> incident open in this channel</label>
+            <label class="inc"><input type="checkbox" id="incToggle"> the last draft failed the verifier</label>
           </div>
         </div>
         <button type="submit" class="send" aria-label="Send">Send</button>
@@ -63,12 +63,16 @@
     </div>
 
     <div class="scenarios">
-      <span class="sc-label">Flows</span>
-      <p class="legend"><b>Read this first.</b> The tier decision, every tool call and its schema
-      check, the retrieval ranking and scores, the debate's termination, the token budgets and the
-      verifier are <b>executed in your browser when you press play</b>. The only fixture is what a
-      model would say — a static page holds no API key. Every span is labelled, and the ledger at
-      the bottom of the run panel counts them for you.</p>
+      <div class="sc-top">
+        <span class="sc-label">Flows</span>
+        <details class="legend"><summary>Everything but the model's words is executed in your browser</summary>
+          <p>The tier decision, every tool call and its schema check, the retrieval ranking and
+          scores, the debate's termination, the token budgets and the verifier all run here when
+          you press play. The only fixture is what a model would say — a static page holds no API
+          key. Every span carries a <b>computed</b> / <b>mixed</b> / <b>fixture</b> badge, and the
+          ledger at the bottom of the run panel counts them rather than asking you to infer it.</p>
+        </details>
+      </div>
       <div class="sc-grid" id="scenarios"></div>
     </div>
   </section>

@@ -83,7 +83,15 @@ function spanBody(s) {
     out.push(`<div class="meta">${kv("agent", `${s.agent} · ${s.model} model`)}
       ${kv("tokens", `${s.tokIn} in · ${s.tokOut} out${s.budget ? ` · budget ${s.budget}` : ""}${s.over ? ' <b class="bad">over</b>' : ""}`)}
       ${kv("latency", s.ms + " ms")}</div>`);
-    out.push(pre("SYSTEM PROMPT — sent verbatim", s.system, "sys"));
+    // 923 chars of every prompt are the shared preamble, identical for every
+    // agent. Showing it first in a 280px window means you meet the same four
+    // rules in every span and scroll to reach the part that differs.
+    if (s.system.startsWith(PREAMBLE)) {
+      out.push(`<details class="pre-fold"><summary>Shared preamble — ${PREAMBLE.length} chars, identical for every agent</summary><pre>${esc(PREAMBLE)}</pre></details>`);
+      out.push(pre(`SYSTEM PROMPT — the part specific to ${s.label}`, s.system.slice(PREAMBLE.length).trim(), "sys"));
+    } else {
+      out.push(pre("SYSTEM PROMPT — sent verbatim", s.system, "sys"));
+    }
     out.push(pre("USER TURN — assembled from the live context", s.user, "usr"));
     out.push(pre("RESPONSE", s.output, "out"));
   }
@@ -309,7 +317,7 @@ function liveTier() {
   const q = $("input").value.trim();
   const el = $("tierLive");
   if (!q) { el.hidden = true; return; }
-  const d = tierFor({ question: q, toolHints: [], incidentActive: $("incToggle").checked });
+  const d = tierFor({ question: q, toolHints: [], retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
   el.hidden = false;
   el.innerHTML = `<b>${d.tier}</b> <code>${esc(d.rule)}</code> <span>${esc(d.note)}</span>`;
 }
@@ -500,10 +508,10 @@ function boot() {
     `<i style="background:${P[k].c}">${P[k].i}</i>`).join("");
 
   $("scenarios").innerHTML = FLOWS.map(f =>
-    `<button class="sc" data-id="${f.id}" title="${esc(f.why)}">
-       <b>${esc(f.name)}</b><i class="chip ${f.impl}">${
-         f.impl === "built" ? "in the repo" : f.impl === "partly" ? "partly built" : "design only"
-       }</i><span>${esc(f.desc)}</span></button>`).join("");
+    `<button class="sc" data-id="${f.id}" title="${esc(f.desc)} — ${esc(f.why)}">
+       <span class="sc-n"><b>${esc(f.name)}</b><i class="chip ${f.impl}">${
+         f.impl === "built" ? "repo" : f.impl === "partly" ? "partly" : "design"
+       }</i></span><span class="sc-d">${esc(f.desc)}</span></button>`).join("");
   $("scenarios").addEventListener("click", e => {
     const b = e.target.closest(".sc"); if (!b) return;
     play(FLOW[b.dataset.id]);
@@ -514,7 +522,7 @@ function boot() {
   $("form").addEventListener("submit", e => {
     e.preventDefault();
     const v = $("input").value.trim(); if (!v) return;
-    const d = tierFor({ question: v, toolHints: [], incidentActive: $("incToggle").checked });
+    const d = tierFor({ question: v, toolHints: [], retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
     say("you", v);
     $("input").value = ""; liveTier();
     // Honest about what this does: the predicate is real, the run that follows

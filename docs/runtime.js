@@ -33,30 +33,6 @@ function vecPreview(text, n = 8) {
   return out;
 }
 
-const words = s => (s || "").toLowerCase().match(/[a-z][a-z0-9_.]{2,}/g) || [];
-
-/* A real ranking, so the scores in the UI are derived rather than decorative.
-   TF-IDF cosine over the in-scope corpus — small, explainable, and it genuinely
-   reorders when the query changes. */
-function rank(query, docs) {
-  const N = docs.length || 1;
-  const df = {};
-  const bags = docs.map(d => {
-    const b = {};
-    for (const w of new Set(words(d.text + " " + d.subject))) { b[w] = 1; df[w] = (df[w] || 0) + 1; }
-    return b;
-  });
-  const idf = w => Math.log(1 + N / (1 + (df[w] || 0)));
-  const q = {};
-  for (const w of words(query)) q[w] = (q[w] || 0) + 1;
-  const qn = Math.hypot(...Object.entries(q).map(([w, c]) => c * idf(w))) || 1;
-  return docs.map((d, i) => {
-    const b = bags[i];
-    const dot = Object.entries(q).reduce((s, [w, c]) => s + (b[w] ? c * idf(w) * idf(w) : 0), 0);
-    const dn = Math.hypot(...Object.keys(b).map(idf)) || 1;
-    return { doc: d, score: +(dot / (qn * dn)).toFixed(3), matched: Object.keys(q).filter(w => b[w]) };
-  }).sort((a, b) => b.score - a.score);
-}
 
 /* ═══════════════ the verifier — real, ~30 lines ═══════════════ */
 
@@ -91,7 +67,7 @@ const claimTokens = s => tokensOf(s).map(t => t.key);
 
 // The one mechanically-checkable property of an unverifiable claim. You cannot
 // verify causation, so you constrain its FORM instead.
-const CAUSAL_C = /\b(caused|because|due to|led to|result(?:ed)? (?:in|from))\b/i;
+const CAUSAL_C = /\b(caused|because|due to|led to|result(?:ed)? (?:in|from)|root cause (?:is|was)|responsible for|triggered|stems from|to blame)\b/i;
 const HEDGE_C  = /\b(likely|consistent with|lines? up|suggests?|appears?|correlat|probabl|points? to)\b/i;
 
 function verify(draft, evidence) {
@@ -106,7 +82,14 @@ function verify(draft, evidence) {
   // Without this, `rate(http_5xx{...}[5m])` fails because the tokeniser splits
   // the JSON form of the same string differently from the backticked form.
   const flat = evidence.map(e => String(e).toLowerCase().replace(/\\"/g, '"')).join("\n");
-  const bare = x => x.replace(/(%|x|×|ms|s|m|h|gb|mb|\/s|rps|k)$/, "");
+  // Longest-first, or "41/s" matches the `s` branch and bares to "41/".
+  const UNIT = /(\/s|rps|ms|gb|mb|%|×|x|s|m|h|k)$/;
+  const bare = x => x.replace(UNIT, "");
+  const unit = x => (x.match(UNIT) || [""])[0];
+  // One-directional. A draft may DROP a unit the evidence carried ("41/s" → "41");
+  // it may never CHANGE one. Evidence of 1450ms must not support a draft that
+  // says 1450s, and 94% must not support 94x.
+  const unitOk = (h, x) => unit(h) === unit(x) || (unit(x) === "" && unit(h) !== "");
   // 1-significant-figure near-match: evidence 41.2 supports a draft that says 41.
   // Without it, correct rounding is rejected and the writer learns to route
   // around the verifier, which is worse than not having one.
@@ -115,15 +98,16 @@ function verify(draft, evidence) {
   // restriction an evidence value of 14:10 "supported" a draft that said
   // 14:55 — inventing a time, which is the single thing this verifier is
   // least allowed to miss. Found by typing a forged draft into the sandbox.
-  const find = (x, cls) => keys.find(h => h === x || bare(h) === bare(x)
-    || (cls === "num" && !isNaN(parseFloat(h)) && !isNaN(parseFloat(x))
+  const find = (x, cls) => keys.find(h => h === x || (bare(h) === bare(x) && unitOk(h, x))
+    || (cls === "num" && unitOk(h, x) && !isNaN(parseFloat(h)) && !isNaN(parseFloat(x))
         && Math.abs(parseFloat(h) - parseFloat(x)) <= Math.abs(parseFloat(h)) * 0.02
         && (bare(h) !== h) === (bare(x) !== x)));
 
   const rows = tokensOf(draft).map(t => {
     const h = find(t.key, t.cls);
     if (h) return { ...t, found: true, src: hay.get(h) };
-    const lit = t.cls === "ident" && (t.quoted || t.key.length > 4) && flat.includes(t.key);
+    const lit = t.cls === "ident" && (t.quoted || t.key.length > 4)
+      && new RegExp(`(^|[^a-z0-9_])${t.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9_]|$)`).test(flat);
     return { ...t, found: lit, src: lit ? "(literal match in evidence)" : null };
   });
   const unsupported = rows.filter(r => !r.found);
@@ -213,7 +197,18 @@ class Run {
     this.calls++;
     const ms = opts.ms ?? (rec.ok ? 90 + Math.round(JSON.stringify(rec.data || {}).length * 0.12) : 20);
     this.ms += ms;
-    if (rec.ok) { this.results.push(rec); this.evidence.push(JSON.stringify(rec.data)); }
+    if (rec.ok) {
+      this.results.push(rec);
+      this.evidence.push(JSON.stringify(rec.data));
+      // A result carries its numbers and its unit in separate fields, so the
+      // corpus never held "1450ms" — only "1450" and "ms". That made a unit
+      // the draft attached unverifiable in either direction. Emit the bound
+      // form too, so "1450 ms" is supported and "1450 s" is not.
+      const u = rec.data?.unit;
+      if (u) this.evidence.push(
+        [...(rec.data.points || []).map(pt => pt[1]), rec.data.min, rec.data.max,
+         rec.data.step_change?.to].filter(v => v != null).map(v => `${v}${u}`).join(" "));
+    }
     const head = rec.ok ? summarise(name, rec.data) : `${rec.stage} — ${rec.error}`;
     this.emit({
       kind: "tool", agent, label: name, ms, head,
@@ -225,28 +220,42 @@ class Run {
     return rec;
   }
 
-  /* Retrieval, shown end to end: the query text, the model, the predicate that
-     was applied, what it excluded, and the ranked hits with real scores. */
+  /* The thread fetch, made explicit. It used to be implicit — the transcript
+     simply appeared — which left the first link of the derivation chain
+     missing and left the catalogued tool never dispatched. */
+  fetchThread(opts = {}) {
+    this.tool("librarian", "slack.conversations_replies",
+      { channel: `C_${this.channel.toUpperCase().replace(/-/g, "")}`, thread_ts: "1699.0", limit: 200 },
+      { because: opts.because || "the mention alone is not the question — three people may be talking, and attribution lives in the line structure",
+        then: opts.then });
+    return this.thread;
+  }
+
+  /* Retrieval, shown end to end. This DISPATCHES memory.mem_search rather than
+     filtering here: a review found the scope predicate implemented twice, with
+     the copy this page documents never executed — deleting it outright left
+     every check green. One predicate, one path, one thing to get right. */
   recall(query, opts = {}) {
-    const all = WORLD.memories;
-    const inScope = all.filter(m => m.scope_id === this.scope);
-    const ranked = rank(query, inScope).filter(r => r.score > 0).slice(0, opts.k || 4);
-    const ms = 40 + inScope.length * 3;
+    const rec = callTool("memory.mem_search", { query, k: opts.k || 4 },
+      { agent: "librarian", scope: this.scope, thread: this.thread, approved: this.approved });
+    const d = rec.data || { hits: [], corpus: 0, inScope: 0, excluded: 0 };
+    const ms = 40 + d.inScope * 3;
     this.ms += ms;
-    for (const r of ranked) this.evidence.push(r.doc.text);
+    for (const h of d.hits) this.evidence.push(h.text);
     this.emit({
       kind: "vector", agent: "librarian", label: "memory.mem_search", ms,
       query, model: "text-embedding-3-small", dims: 1536, preview: vecPreview(query),
-      head: `${ranked.length} hit${ranked.length === 1 ? "" : "s"} of ${inScope.length} in scope` +
-            (ranked.length ? ` · top ${ranked[0].score}` : " · nothing matched"),
+      head: `${d.hits.length} hit${d.hits.length === 1 ? "" : "s"} of ${d.inScope} in scope` +
+            (d.hits.length ? ` · top ${d.hits[0].score}` : " · nothing matched"),
       predicate: `scope_id = "${this.scope}"`,
-      corpus: all.length, inScope: inScope.length, excluded: all.length - inScope.length,
-      hits: ranked.map(r => ({ id: r.doc.id, score: r.score, matched: r.matched, kind: r.doc.kind,
-                               age: r.doc.age_days, prov: r.doc.provenance, text: r.doc.text })),
+      corpus: d.corpus, inScope: d.inScope, excluded: d.excluded,
+      spec: rec.spec, args: rec.args,
+      hits: d.hits.map(h => ({ id: h.id, score: h.score, matched: h.matched, kind: h.kind,
+                               age: h.age_days, prov: h.provenance, text: h.text })),
       because: opts.because,
-      partial: "the 1536-d vector preview is illustrative — the ranking, scores and scope filter below are computed",
+      partial: "the 1536-d vector preview is illustrative — the scope filter, ranking and scores below are computed",
     });
-    return ranked.map(r => r.doc);
+    return d.hits;
   }
 
   /* The tier decision — pure code, and the operands are shown alongside the
@@ -257,7 +266,7 @@ class Run {
     this.emit({
       kind: "route", agent: "orchestrator", label: "tier predicate", ms: 1,
       head: `${d.tier} · ${spec.name}`, rule: d.rule, note: d.note,
-      operands: { question: this.sc.question, incidentActive: !!ctx.incidentActive,
+      operands: { question: this.sc.question,
                   toolHints: ctx.toolHints || [], retryReason: ctx.retryReason || null,
                   "CAUSAL.test(question)": CAUSAL.test(this.sc.question) },
       path: spec.nodes, source: AGENT.orchestrator.predicate,
@@ -381,6 +390,7 @@ class Run {
       kind: "verify", agent: "verifier", label: "mechanical check", ms: 3,
       ok: v.pass, checked: v.checked, corpus: v.corpus,
       rows: v.rows, unsupported: v.unsupported, unhedged: v.unhedged,
+      because: `every claim token in the draft is set-differenced against ${this.results.length} tool result(s) plus the transcript — the draft's own upstream turns are deliberately not in the corpus`,
       head: v.pass ? `${v.checked} claim tokens, all grounded`
         : [v.unsupported.length ? `${v.unsupported.length} unsupported: ${v.unsupported.map(r => r.raw).join(", ")}` : "",
            v.unhedged.length ? `${v.unhedged.length} unhedged causal` : ""].filter(Boolean).join(" · "),
@@ -397,5 +407,5 @@ const fmtResults = rs => rs.length ? rs.map(r => `  ${r.name}(${JSON.stringify(r
 
 if (typeof module !== "undefined") {
   Object.assign(global, require("./tools.js"), require("./agents.js"));
-  module.exports = { Run, verify, rank, tok, claimTokens, fmtThread, fmtMem, fmtResults, vecPreview };
+  module.exports = { Run, verify, tok, claimTokens, fmtThread, fmtMem, fmtResults, vecPreview };
 }

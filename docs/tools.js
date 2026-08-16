@@ -103,6 +103,36 @@ const WORLD = {
   ],
 };
 
+// TF-IDF cosine over the in-scope corpus. Small, explainable, and it genuinely
+// reorders when the query changes — so the scores in the UI are derived rather
+// than decorative. It lives here rather than in the run engine because ranking
+// is the store's job, and keeping it beside the scope filter means there is
+// exactly one place that decides what a caller may see.
+const words = s => (s || "").toLowerCase().match(/[a-z][a-z0-9_.]{2,}/g) || [];
+
+/* A real ranking, so the scores in the UI are derived rather than decorative.
+   TF-IDF cosine over the in-scope corpus — small, explainable, and it genuinely
+   reorders when the query changes. */
+function rank(query, docs) {
+  const N = docs.length || 1;
+  const df = {};
+  const bags = docs.map(d => {
+    const b = {};
+    for (const w of new Set(words(d.text + " " + d.subject))) { b[w] = 1; df[w] = (df[w] || 0) + 1; }
+    return b;
+  });
+  const idf = w => Math.log(1 + N / (1 + (df[w] || 0)));
+  const q = {};
+  for (const w of words(query)) q[w] = (q[w] || 0) + 1;
+  const qn = Math.hypot(...Object.entries(q).map(([w, c]) => c * idf(w))) || 1;
+  return docs.map((d, i) => {
+    const b = bags[i];
+    const dot = Object.entries(q).reduce((s, [w, c]) => s + (b[w] ? c * idf(w) * idf(w) : 0), 0);
+    const dn = Math.hypot(...Object.keys(b).map(idf)) || 1;
+    return { doc: d, score: +(dot / (qn * dn)).toFixed(3), matched: Object.keys(q).filter(w => b[w]) };
+  }).sort((a, b) => b.score - a.score);
+}
+
 /* ═══════════════ 2 · a real schema validator ═══════════════
    Small on purpose. It exists so "the params are typed" is a fact about the
    running code rather than a claim in a diagram. */
@@ -338,18 +368,20 @@ const TOOLS = [
     desc: "Search long-term memory. Scope comes from the channel binding in ctx, never from arguments.",
     callers: ["librarian"],
     params: { type: "object", required: ["query"], properties: { query: str(), k: num({ minimum: 1, maximum: 10 }) } },
+    clamps: { max_k: 10 },
     run(a, ctx) {
-      // THE security boundary. scope_id is read from the binding the dispatcher
-      // holds; there is deliberately no scope parameter for a caller to set, and
-      // the predicate runs inside the filter rather than over the results.
-      const terms = a.query.toLowerCase().split(/\W+/).filter(w => w.length > 3);
-      const hits = WORLD.memories
-        .filter(m => m.scope_id === ctx.scope)                       // predicate, not post-filter
-        .map(m => ({ m, s: terms.filter(w => (m.text + " " + m.subject).toLowerCase().includes(w)).length }))
-        .filter(x => x.s > 0)
-        .sort((x, y) => y.s - x.s)
-        .slice(0, a.k || 4);
-      return { ok: true, data: { scope: ctx.scope, considered: WORLD.memories.filter(m => m.scope_id === ctx.scope).length, hits: hits.map(x => x.m) } };
+      // THE security boundary, and the only copy of it. scope_id is read from
+      // the binding the dispatcher holds; there is deliberately no scope
+      // parameter for a caller to set, and the predicate runs inside the filter
+      // rather than over the results.
+      const inScope = WORLD.memories.filter(m => m.scope_id === ctx.scope);
+      const hits = rank(a.query, inScope).filter(r => r.score > 0).slice(0, a.k || 4)
+        .map(r => ({ ...r.doc, score: r.score, matched: r.matched }));
+      return { ok: true, data: {
+        scope: ctx.scope, corpus: WORLD.memories.length,
+        inScope: inScope.length, excluded: WORLD.memories.length - inScope.length,
+        hits,
+      } };
     },
   },
 ];
@@ -406,37 +438,5 @@ const A2A_CARDS = [
   },
 ];
 
-/* The A2A client. A task, not a function call: it has states, it can be
-   rejected, and the caller must be able to finish without it. */
-function a2aTask(cardName, skillId, input, opts = {}) {
-  const card = A2A_CARDS.find(c => c.name === cardName);
-  if (!card) return { states: ["rejected"], ok: false, error: `no agent card for ${cardName}` };
-  if (!card.skills.some(s => s.id === skillId))
-    return { states: ["rejected"], ok: false, error: `${cardName} advertises no skill '${skillId}'` };
-  if (opts.down) return { states: ["submitted", "failed"], ok: false, error: "specialist unreachable" };
 
-  const pms = WORLD.postmortems.filter(p => p.service === input.service);
-  return {
-    id: "tsk_9f2", states: ["submitted", "working", "completed"], ok: true,
-    elapsed_s: card._slo.p50_s,
-    artifacts: [{
-      name: "correlation",
-      parts: [{ kind: "data", data: {
-        matches: pms.map(p => ({
-          id: p.id, date: p.date, title: p.title,
-          shared: p.signals.filter(s => input.signals.some(x => overlap(s, x))),
-          differs: p.signals.filter(s => !input.signals.some(x => overlap(s, x))),
-          remediation: p.remediation,
-        })),
-      } }],
-    }],
-    citations: pms.map(p => p.id),
-  };
-}
-const overlap = (a, b) => {
-  const w = s => new Set(s.toLowerCase().split(/\W+/).filter(x => x.length > 3));
-  const A = w(a), B = w(b);
-  return [...A].some(x => B.has(x));
-};
-
-if (typeof module !== "undefined") module.exports = { WORLD, TOOLS, TOOL, callTool, validate, A2A_CARDS, a2aTask, t, hhmm, hms };
+if (typeof module !== "undefined") module.exports = { WORLD, TOOLS, TOOL, callTool, validate, rank, A2A_CARDS, t, hhmm, hms };
