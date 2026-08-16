@@ -118,10 +118,6 @@ function verify(draft, evidence) {
            checked: rows.length, corpus: hay.size };
 }
 
-/* The registry says the verifier is code rather than a model. Back-fill the
-   actual source so the UI shows the algorithm instead of a claim about it. */
-if (typeof AGENT !== "undefined") AGENT.verifier.predicate = verify.toString();
-
 /* One line that says what actually came back. A span headed "called a tool"
    is the abstraction this whole page exists to replace. */
 function gist(out) {
@@ -178,13 +174,17 @@ class Run {
     const tin = tok(a.system) + tok(user), tout = tok(output);
     this.tokIn += tin; this.tokOut += tout;
     const ms = opts.ms ?? Math.round(180 + tin * 0.09 + tout * 1.4);
-    this.ms += ms;
+    // `async` work happens after the reply is in the channel. It costs tokens
+    // but it does not cost the person who asked anything, so it must not be
+    // counted in the service time the capacity model is built from.
+    if (opts.async) this.asyncMs = (this.asyncMs || 0) + ms; else this.ms += ms;
     this.emit({
       kind: "model", agent: a.id, label: a.name, model: a.model, ms,
       head: opts.head || gist(output) || a.owns,
       tokIn: tin, tokOut: tout, budget: a.budget,
       over: tin + tout > a.budget,
       system: a.system, user, output,
+      async: !!opts.async,
       because: opts.because,
       fixture: "the model's output text",
     });
@@ -218,6 +218,57 @@ class Run {
       fixture: null,
     });
     return rec;
+  }
+
+  /* The Librarian, as code.
+     It was a small-model call on the critical path of every run — 18% of all
+     tokens — and a measurement showed its output reached no downstream prompt.
+     The Writer receives {results} and {memories}; the Planner receives
+     {transcript} and {entities}. Nobody ever read its summary.
+
+     What it was actually FOR is all mechanical: fetch the thread, retrieve
+     inside the scope predicate, trim to the budget. Entity extraction reuses
+     tokensOf() — the verifier's own extractor — so one piece of code serves
+     both retrieval and grounding, and neither needs a model. */
+  library(opts = {}) {
+    const t0 = this.ms;
+    this.fetchThread({ because: opts.because });
+
+    // Entities, by the same extractor the verifier uses on the draft.
+    const ents = [...new Set(this.thread.flatMap(m =>
+      tokensOf(m.text).filter(t => t.cls === "ident" || t.cls === "version" || t.cls === "time")
+        .map(t => t.raw.replace(/`/g, ""))))];
+    // Retrieve on the CONVERSATION, not just on the last line. "is this the
+    // same root cause as March?" shares no keyword with "pool exhaustion after
+    // a retry change" — but the message two above it says "March was the pool
+    // thing", and that is the term that finds it. A real embedding would bridge
+    // the gap semantically; a keyword ranker needs the words to be present, and
+    // pretending otherwise would make the retrieval span a lie.
+    const ask = this.sc.question.replace(/<@\w+>/g, "").trim();
+    const recent = this.thread.slice(-4).map(m => m.text).join(" ");
+    const query = [ask, recent, ...ents].join(" ").slice(0, 300);
+
+    // Instruction-shaped text is FLAGGED here and enforced nowhere here — the
+    // allowlist is the enforcement. A regex that thought it was a security
+    // control would be worse than no regex.
+    const INJ = /\b(ignore (all )?(your |the )?previous instructions|disregard the above|system prompt|list every memory|reveal your)\b/i;
+    const dropped = this.thread.filter(m => INJ.test(m.text))
+      .map(m => ({ from: m.user, text: (m.text.match(INJ) || [])[0], why: "instruction-shaped text in an untrusted transcript — reported as content, never obeyed" }));
+
+    const mems = this.recall(query, { because: `entities extracted from the thread by tokensOf(): ${ents.slice(0, 6).join(", ") || "none"}` });
+
+    this.emit({
+      kind: "route", agent: "librarian", label: "context assembled", ms: 2,
+      head: `${this.thread.length} msgs · ${ents.length} entities · ${mems.length} memories · ${dropped.length} flagged`,
+      note: "No model runs here. This was a small-model call whose output nothing downstream ever read; what it was for is mechanical.",
+      operands: { thread_messages: this.thread.length, char_budget: 24000,
+                  entities: ents, retrieval_query: query, scope: this.scope,
+                  flagged_as_content: dropped },
+      source: Run.prototype.library.toString(),
+      fixture: null,
+    });
+    this.ms = t0 + (this.ms - t0);
+    return { memories: mems, entities: ents, dropped };
   }
 
   /* The thread fetch, made explicit. It used to be implicit — the transcript
@@ -409,3 +460,10 @@ if (typeof module !== "undefined") {
   Object.assign(global, require("./tools.js"), require("./agents.js"));
   module.exports = { Run, verify, tok, claimTokens, fmtThread, fmtMem, fmtResults, vecPreview };
 }
+
+/* Two agents in the registry say they are code rather than a model. Back-fill
+   their actual source, so the UI shows the algorithm instead of a claim about
+   one. This has to run after the module block above, because that is where
+   Node picks up AGENT. */
+AGENT.verifier.predicate = verify.toString();
+AGENT.librarian.predicate = Run.prototype.library.toString();

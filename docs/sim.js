@@ -185,9 +185,10 @@ const KIND_LABEL = { model: "model", tool: "tool", vector: "vector", route: "rou
 
 function renderSpan(s, i) {
   const el = document.createElement("details");
-  el.className = "span k-" + s.kind + (s.ok === false ? " failed" : "");
-  const badge = s.fixture ? `<i class="pv fix">fixture</i>`
-    : s.partial ? `<i class="pv part">mixed</i>` : `<i class="pv comp">computed</i>`;
+  el.className = "span k-" + s.kind + (s.ok === false ? " failed" : "") + (s.async ? " async" : "");
+  const badge = (s.fixture ? `<i class="pv fix">fixture</i>`
+    : s.partial ? `<i class="pv part">mixed</i>` : `<i class="pv comp">computed</i>`)
+    + (s.async ? `<i class="pv async">after the reply</i>` : "");
   el.innerHTML = `<summary>
       <span class="ix">${String(i + 1).padStart(2, "0")}</span>
       <span class="kd">${KIND_LABEL[s.kind]}</span>
@@ -227,8 +228,9 @@ async function play(flow) {
   const slow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   try {
-    for (let i = 0; i < spans.length; i++) {
-      const s = spans[i];
+    const live = spans.filter(s => !s.async), after = spans.filter(s => s.async);
+    for (let i = 0; i < live.length; i++) {
+      const s = live[i];
       if (slow) await sleep(Math.min(600, 120 + s.ms / 5));
       if (s.kind === "model" && s.agent === "writer") typing(true);
       $("trace").appendChild(renderSpan(s, i));
@@ -242,6 +244,13 @@ async function play(flow) {
     }
     typing(false);
     if (answer) say("claude", answer, { tag: "APP", ambient: flow.id === "ambient" });
+    // Everything below this line is off the critical path — the person who
+    // asked is already reading the answer.
+    for (let i = 0; i < after.length; i++) {
+      if (slow) await sleep(300);
+      $("trace").appendChild(renderSpan(after[i], live.length + i));
+      $("trace").scrollTop = 1e9;
+    }
     setState("idle");
     renderLedger(lastRun);
     openSandbox(lastRun);
@@ -253,7 +262,8 @@ async function play(flow) {
 
 function stats(rt, n) {
   $("tstats").innerHTML =
-    `<span><b>${n}</b> spans</span><span><b>${(rt.ms / 1000).toFixed(1)}s</b></span>` +
+    `<span><b>${n}</b> spans</span><span><b>${(rt.ms / 1000).toFixed(1)}s</b> service` +
+    (rt.asyncMs ? ` <em>+${(rt.asyncMs / 1000).toFixed(1)}s after</em>` : "") + `</span>` +
     `<span><b>${(rt.tokIn / 1000).toFixed(1)}k</b> in</span><span><b>${rt.tokOut}</b> out</span>` +
     `<span><b>${rt.calls}</b> tools</span>`;
 }
@@ -274,7 +284,7 @@ function renderTiers(active) {
     const on = t.id === active;
     return `<li class="${on ? "act" : ""}"><span class="pip"></span>
       <span class="nm">${t.id} · ${t.name}</span>
-      <span class="st">${on ? t.nodes.length + " nodes" : t.calls + " calls"}</span></li>` +
+      <span class="st">${on ? t.nodes.length + " nodes" : t.calls + (t.calls === "1" ? " call" : " calls")}</span></li>` +
       (on ? `<li class="sub"><span></span><span class="path">${t.nodes.join(" → ")}</span></li>` : "");
   }).join("");
 }
@@ -347,6 +357,7 @@ const PROTO = [
 ];
 
 const STACK = [
+  ["What runs no model","orchestrator · librarian · verifier","Three of the nodes on the common path are code. The librarian was a small-model call until a measurement asked whether anything read its output — nothing did."],
   ["Ingress","Bolt · Socket Mode","No public URL, no signature handling, and the 3-second ack is the SDK's problem rather than yours."],
   ["Queue","Postgres · SKIP LOCKED","One table and a lease. Rows are mutated in place, so this is state, not an audit log."],
   ["Orchestration","LangGraph","Conditional edges, a checkpointer and interrupt() — the three things a hand-rolled loop reinvents badly."],
@@ -380,13 +391,14 @@ const CAP = [
   ["In Claude-enabled channels","~40","4 channels; not everyone lives in them."],
   ["Mentions per active user per day","6","Assumption. The number most worth challenging."],
   ["Runs per day","~240","40 × 6. Ambient adds ~12."],
+  ["Model calls per run","1 / 2–3 / 4–6","T0 / T1 / T2. Two of the five nodes on the common path run no model at all."],
   ["Share routed to T2 debate","~20%","Causal wording plus active incidents. Measure it in Phase 1 — this drives the token line below."],
   ["Peak hour share","18%","~43 runs/hr, so roughly 0.7/min."],
-  ["p95 <i>service</i> time","38s T1 / 63s T2","Time to produce an answer once a worker starts. Not what a user waits."],
+  ["p95 <i>service</i> time","33s T1 / 58s T2","Time to produce an answer once a worker starts. Both dropped ~5s when the librarian became code and the scribe moved after the post."],
   ["p95 <i>response</i> time","106s / 48s","What the user actually waits: 1 worker / 2 workers. M/D/c at 0.72/min."],
   ["Runs/min one worker absorbs<br>before p95 doubles","~0.8","ρ≈0.5. The row that makes every other row actionable."],
   ["Workers to deploy","2 (3 at Phase 3)","Two for load, a third so a rolling restart is not a degradation."],
-  ["LLM tokens per day","~3.4M in / ~0.2M out","240 runs; T2's extra planner+critic rounds are the delta over the old 2.9M."],
+  ["LLM tokens per day","~2.9M in / ~0.2M out","240 runs. Was ~3.4M: deleting the librarian's model call removed 18% of every run's spend for no loss, because nothing downstream read its output."],
   ["Ambient triage tokens/day","~1-2M","Scales with <i>messages</i> seen, not answers posted — plausibly the largest line here."],
   ["Debate token ceiling","12k / run","Enforced, not requested. A debate with no ceiling is an unbounded bill."],
   ["Vectors written per day","~480","2 memories per run. Under 200k in a year — Qdrant is not the constraint."],

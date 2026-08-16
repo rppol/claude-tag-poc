@@ -108,7 +108,15 @@ const WORLD = {
 // than decorative. It lives here rather than in the run engine because ranking
 // is the store's job, and keeping it beside the scope filter means there is
 // exactly one place that decides what a caller may see.
-const words = s => (s || "").toLowerCase().match(/[a-z][a-z0-9_.]{2,}/g) || [];
+// IDF learns which terms are uninformative from the corpus — but this corpus is
+// four documents, so it cannot. Without an explicit stoplist a query and a
+// memory match on "the" and score above zero, which is how an engineering
+// question asked in #sales-eu came back with a sales memory attached.
+const STOP = new Set(("the and for was were are you your this that with from have has had not " +
+  "but all any can did does about into out over then than they them there here what when where " +
+  "which who why how our their its his her also more most some such only just very now new " +
+  "one two get got let put say see use via per off yet still every each both").split(" "));
+const words = s => ((s || "").toLowerCase().match(/[a-z][a-z0-9_.]{2,}/g) || []).filter(w => !STOP.has(w));
 
 /* A real ranking, so the scores in the UI are derived rather than decorative.
    TF-IDF cosine over the in-scope corpus — small, explainable, and it genuinely

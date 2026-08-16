@@ -577,3 +577,6 @@ details.legend p b{font-family:var(--body);font-weight:600;color:var(--text)}
    agent card inflated the two beside it into tall empty boxes. Cards are
    collapsible, so they must size to their own content. */
 .agents{align-items:start}
+.pv.async{color:var(--mono-quiet);border-color:var(--ink-4)}
+.span.async{opacity:.82;border-style:dashed}
+.tstats em{font-style:normal;color:var(--mono-quiet)}

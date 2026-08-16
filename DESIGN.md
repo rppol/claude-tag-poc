@@ -381,3 +381,72 @@ types. A page that rejects a number *you* invented is not a replay.
 model fixture survives the real verifier against its own evidence. A fixture that cannot is
 a lie about the system, which is the "test that passes against broken code" failure
 relocated into content. It caught eight of mine on its first run.
+
+
+---
+
+## 10 · What the stack turned out not to need
+
+The agent layer was measured across all nine flows before it was defended. Three
+things did not survive the measurement.
+
+### The Librarian's model call was 18% of every token and nobody read its output
+
+It was a small-model call on the critical path of every run. The question that
+settled it was not "is it well designed" but "does anything consume it": the
+Writer's prompt takes `{results}` and `{memories}`, the Planner's takes
+`{transcript}` and `{entities}`, and no prompt anywhere contained its summary.
+It was a serialized round-trip whose result was rendered in the trace and thrown
+away.
+
+Everything it was actually for is mechanical — fetch the thread, retrieve inside
+the scope predicate, trim to the budget, extract entities. It is now about
+twenty-five lines of code, and the entity extraction reuses `tokensOf()`, the
+verifier's own extractor. One piece of code decides both which entities to
+retrieve on and which tokens in a draft must be grounded.
+
+The honest cost: a keyword extractor retrieves worse than a small model would.
+That is written into the agent's `fails` field, and recall quality is the first
+thing to measure in Phase 2 — it is also the easiest thing to put back.
+
+### The Scribe was blocking a reply nobody was waiting for
+
+It ran before the run was marked done, so its latency landed in the service time
+the capacity model is built from. It now runs after the post. Same tokens, and
+they no longer cost the person who asked anything. The run tree labels those
+spans *after the reply* and the stats line reports service and async time
+separately, because conflating them is how a capacity table ends up describing
+work no user experiences.
+
+### Measured effect across the nine flows
+
+| | before | after | |
+|---|---|---|---|
+| model calls | 31 | 23 | −26% |
+| tokens | 28,034 | 23,798 | −15% |
+| service time | 18,661 ms | 16,004 ms | −14% |
+
+Two of the five nodes on the common path now run no model at all, and a third —
+the Orchestrator — never did.
+
+### What was considered and kept
+
+**T0 as its own tier.** Once the Librarian is code, T0 is just the Writer, and a
+tool-calling model handed the thread answers without calling a tool — the same
+one call T1 would make. T0's saving is therefore close to illusory, and the only
+way to make it real is a smaller model for "easy" questions, which needs a
+classifier to decide, which is the Router this design deleted. It is kept because
+the branch is free and it makes the orchestrator's decision legible, but it is
+the next thing to delete if the roster needs shrinking.
+
+**The Writer as a separate call from the Agent.** Merging them saves a large-model
+call. It also breaks the cheap rejection loop: when the verifier rejects, the
+Writer re-runs alone against a clean context instead of replaying the entire tool
+loop. That is the Writer's real justification, and it is a better one than the
+prompt originally gave.
+
+### What must not be short-circuited
+
+The ack seam and the queue, because they are the premise. The scope predicate,
+because it is the security model. Dedupe, lease and post-fencing, because they are
+correctness under concurrency. And the Verifier, because it costs nothing.

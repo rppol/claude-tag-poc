@@ -179,7 +179,20 @@ console.log("\ninvariants a refactor could silently undo");
      "and no system prompt is either");
 }
 
-// 4 · the catalogue must not rot the way the roster did
+// 4 · the librarian is code now. If a model call reappears there, the 18% of
+//     tokens spent on an output nothing read comes back with it.
+{
+  const libModel = FLOWS.flatMap(f => f._spans).filter(s => s.kind === "model" && s.agent === "librarian");
+  ok(libModel.length === 0, "the librarian makes no model call", libModel.length + " found");
+  ok(AGENT.librarian.model === "none" && AGENT.librarian.predicate.length > 400,
+     "and the registry says so, with its source");
+  const calls = FLOWS.map(f => f._spans.filter(s => s.kind === "model").length);
+  ok(Math.max(...calls) <= 5, `no flow exceeds 5 model calls (max ${Math.max(...calls)})`);
+  const scribes = FLOWS.flatMap(f => f._spans).filter(s => s.agent === "scribe" && s.kind === "model");
+  ok(scribes.every(s => s.async), "the scribe runs after the reply, not before it");
+}
+
+// 5 · the catalogue must not rot the way the roster did
 {
   const used = new Set();
   for (const f of FLOWS) for (const s of f._spans)
@@ -188,22 +201,22 @@ console.log("\ninvariants a refactor could silently undo");
   ok(cold.length === 0, "every catalogued tool is exercised by some flow", cold.join(", "));
 }
 
-// 5 · a unit swap is the highest-consequence miss available in an incident
+// 6 · a unit swap is the highest-consequence miss available in an incident
 ok(!verify("p99 is 1450 s.", ['{"unit":"ms"}', "1450ms"]).pass,
    "evidence of 1450ms does not support a draft saying 1450 s");
 ok(verify("p99 is 1450 ms.", ['{"unit":"ms"}', "1450ms"]).pass,
    "but the same unit does");
 ok(!verify("hit ratio is 94x.", ["94%"]).pass, "94% does not support 94x");
 
-// 6 · the literal fallback was unanchored: `main` passed against "domain"
+// 7 · the literal fallback was unanchored: `main` passed against "domain"
 ok(!verify("base is `main`.", ["the domain was unrelated"]).pass,
    "a backticked identifier does not match inside a longer word");
 
-// 7 · the shape check must cover the phrasings an incident actually uses
+// 8 · the shape check must cover the phrasings an incident actually uses
 for (const p of ["The root cause is the retry config.", "The deploy is responsible for the outage.", "The deploy triggered the outage."])
   ok(!verify(p, [p.toLowerCase()]).pass, `unhedged: "${p.slice(0, 34)}…"`);
 
-// 8 · the derivation chain is the point of the page
+// 9 · the derivation chain is the point of the page
 {
   const w = FLOWS.flatMap(f => f._spans.filter(s => s.agent === "writer"));
   ok(w.every(s => s.because), `all ${w.length} writer spans say why they wrote what they wrote`,
