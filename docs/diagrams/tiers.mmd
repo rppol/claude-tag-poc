@@ -16,13 +16,10 @@ flowchart TB
   V -->|"clean"| POST(["post to thread"])
   POST -.->|"off the critical path —<br/>the person is already reading"| SC["<b>scribe</b><br/><small>what survives this run</small>"]
 
-  NOTE["<small>Two of the five nodes on the common path<br/>run no model at all. The librarian was a<br/>small-model call until a measurement showed<br/>nothing downstream read its output — 18% of<br/>every token, rendered and discarded.</small>"]
 
   classDef mech stroke:#EDAE55,fill:#33281A,color:#F0DEC0
   classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
   classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
-  classDef note fill:none,stroke:none,color:#8B7FA0
   class P,LIB,V mech
   class T0,T1,T2,SC design
   class IN,POST built
-  class NOTE note

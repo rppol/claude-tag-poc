@@ -103,8 +103,6 @@ function spanBody(s) {
       ${kv("stage", `<span class="stage ${s.ok ? "ok" : "no"}">${s.stage}</span>`)}
       ${kv("latency", s.ms + " ms")}</div>`);
     out.push(pre("REQUEST — arguments as dispatched", j(s.args), "usr"));
-    if (sp) out.push(pre("PARAM SCHEMA — validated before the call, in code", j(sp.params), "sys"));
-    if (sp?.clamps) out.push(pre("CLAMPS", j(sp.clamps), "sys"));
     out.push(s.ok ? pre("RESPONSE", j(s.result), "out")
                   : `<div class="blk err"><div class="blk-h">REJECTED at the <b>${esc(s.stage)}</b> stage</div><pre>${esc(s.error)}</pre></div>`);
     if (s.then) out.push(`<p class="why then"><b>What it changed:</b> ${esc(s.then)}</p>`);
@@ -138,7 +136,6 @@ function spanBody(s) {
     if (s.note) out.push(`<p class="why">${esc(s.note)}</p>`);
     if (s.operands) out.push(pre("OPERANDS — evaluated against this run", j(s.operands), "usr"));
     if (s.path) out.push(`<p class="why"><b>Path:</b> ${s.path.map(n => `<code>${esc(n)}</code>`).join(" → ")}</p>`);
-    if (s.source) out.push(pre("PREDICATE SOURCE", s.source, "sys"));
   }
 
   if (s.kind === "verify") {
@@ -211,7 +208,6 @@ async function play(flow) {
   $("msgs").innerHTML = "";
   $("trace").innerHTML = "";
   $("traceEmpty").style.display = "none";
-  $("ckpt").innerHTML = `flow <b>${esc(flow.id)}</b>`;
   for (const m of flow.thread) say(m.user, m.text, { at: m.at });
 
   // The whole run is COMPUTED first, then revealed. Nothing below this line
@@ -224,7 +220,6 @@ async function play(flow) {
 
   ack();
   setState("running");
-  renderTiers(rt.tierId);
   const slow = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   try {
@@ -261,33 +256,26 @@ async function play(flow) {
 }
 
 function stats(rt, n) {
+  const tier = TIERS.find(t => t.id === rt.tierId);
   $("tstats").innerHTML =
-    `<span><b>${n}</b> spans</span><span><b>${(rt.ms / 1000).toFixed(1)}s</b> service` +
-    (rt.asyncMs ? ` <em>+${(rt.asyncMs / 1000).toFixed(1)}s after</em>` : "") + `</span>` +
-    `<span><b>${(rt.tokIn / 1000).toFixed(1)}k</b> in</span><span><b>${rt.tokOut}</b> out</span>` +
-    `<span><b>${rt.calls}</b> tools</span>`;
+    (tier ? `<span class="t-tier"><b>${tier.id}</b> ${tier.name}</span>` : "") +
+    `<span><b>${ackMs}</b>ms ack</span>` +
+    `<span><b>${n}</b> spans</span>` +
+    `<span><b>${(rt.ms / 1000).toFixed(1)}s</b>` + (rt.asyncMs ? ` <em>+${(rt.asyncMs / 1000).toFixed(1)}s after</em>` : "") + `</span>` +
+    `<span><b>${(rt.tokIn / 1000).toFixed(1)}k</b> in · <b>${rt.tokOut}</b> out</span>` +
+    `<span><b>${rt.calls}</b> tools</span>` +
+    (tier ? `<span class="t-path">${tier.nodes.join(" → ")}</span>` : "");
 }
-function ack() {
-  const ms = 28 + Math.floor(Math.random() * 34);
-  $("ackUsed").textContent = ms;
-  $("ackVerdict").textContent = "200 OK · budget kept";
-  $("ackBar").style.transform = `scaleX(${Math.max(0.012, ms / 3000)})`;
-}
+// The 3s ack budget had a whole panel and a meter. It is one number, and the
+// only interesting thing about it is that it is two orders of magnitude clear.
+let ackMs = 0;
+function ack() { ackMs = 28 + Math.floor(Math.random() * 34); }
 function setState(s) {
   const el = $("rtState");
   el.textContent = s;
   el.className = (s === "running" || s === "waiting") ? "busy" : "";
 }
 
-function renderTiers(active) {
-  $("lanes").innerHTML = TIERS.map(t => {
-    const on = t.id === active;
-    return `<li class="${on ? "act" : ""}"><span class="pip"></span>
-      <span class="nm">${t.id} · ${t.name}</span>
-      <span class="st">${on ? t.nodes.length + " nodes" : t.calls + (t.calls === "1" ? " call" : " calls")}</span></li>` +
-      (on ? `<li class="sub"><span></span><span class="path">${t.nodes.join(" → ")}</span></li>` : "");
-  }).join("");
-}
 
 /* The fixture ledger. You should not have to infer how much of this was
    pre-written — it is counted for you. */
@@ -347,77 +335,29 @@ function renderChannels() {
 
 /* ═══════════════ architecture tab — rendered from the SAME registries ═══════════════ */
 
-const PROTO = [
-  {h:"MCP", s:"Model Context Protocol · tools you own",
-   p:"A typed, synchronous call into a capability inside your trust boundary. The catalogue below is the real one — the simulator dispatches against it, so a schema violation you can read here is a schema violation that actually rejects.",
-   l:["Servers wrap Grafana, PagerDuty, GitHub and the platform itself","The agent never sees a credential — it is injected at egress","Per-agent allowlist, enforced as set membership at dispatch","Every call lands in the audit log with its actor"]},
-  {h:"A2A", s:"Agent-to-Agent · work you delegate",
-   p:"An asynchronous task handed to something with its own goals, model and lifecycle. You do not call it; you ask it, and it can decline. It earns the protocol only if it does something a tool structurally cannot.",
-   l:["Agent card advertises skills, auth, transports","submitted → working → input-required | completed | failed | canceled | rejected","It can pause and ask YOU a question, then resume on the same task id","It can outlive the worker that started it"]},
-];
-
-const STACK = [
-  ["What runs no model","orchestrator · librarian · verifier","Three of the nodes on the common path are code. The librarian was a small-model call until a measurement asked whether anything read its output — nothing did."],
-  ["Ingress","Bolt · Socket Mode","No public URL, no signature handling, and the 3-second ack is the SDK's problem rather than yours."],
-  ["Queue","Postgres · SKIP LOCKED","One table and a lease. Rows are mutated in place, so this is state, not an audit log."],
-  ["Orchestration","LangGraph","Conditional edges, a checkpointer and interrupt() — the three things a hand-rolled loop reinvents badly."],
-  ["Tracing","LangSmith","Per-node spans with tokens and latency. Without it, debugging a multi-agent run is archaeology."],
-  ["Memory","mem0 + structured rows","Only symptom similarity wants an embedding. Entity facts and causal resolutions are rows, because contradiction is a comparison on (subject, predicate) and not a distance threshold."],
-  ["Vectors","Qdrant","Payload filtering happens inside the query, which is what makes the scope predicate enforceable."],
-  ["Models","Routed by tier","A tier predicate does not need a model at all. Librarian and Scribe are small; Planner, Critic and Writer are not."],
-  ["Policy","Own it","Allowlist, clamps, budget and approval are code. Anything enforced only in a prompt is a request."],
-];
-
 const FAILS = [
-  ["Platform retry storm","UNIQUE(event_id). The retry becomes a rejected insert instead of a duplicate answer."],
-  ["Worker dies mid-run","Lease expiry requeues; the checkpointer resumes at the failed node so completed tool calls are not repeated."],
-  ["Two workers post the same answer","The lease must exceed the worst-case run, and the right to post is reserved with an atomic UPDATE fenced on the attempt count."],
-  ["One channel floods the queue","One run in flight per channel. FIFO is not fair when a single alert channel can put 200 rows ahead of everyone."],
-  ["A forged turn in the transcript","Message bodies are flattened before formatting. Attribution lives in the line structure, so a newline used to manufacture a turn from someone who never spoke."],
-  ["Memory crosses a channel","Scope in the query predicate, derived from the channel binding. Post-filtering leaks through result counts and ranking, and sits one refactor from deletion."],
-  ["Prompt injection from a channel","Treated as content, never as instruction. The real boundary is the allowlist, which the model cannot edit."],
+  ["Platform retry storm","<code>UNIQUE(event_id)</code>. The retry becomes a rejected insert instead of a duplicate answer — no coordination, no dedupe service."],
+  ["Worker dies mid-run","A lease, not an <code>except</code> handler. A SIGKILL runs no handler, so without the sweep the row sits in <code>running</code> forever."],
+  ["Two workers post the same answer","The lease must exceed the worst-case run, and the right to post is reserved by an atomic UPDATE fenced on the attempt count. A worker whose lease lapsed holds a stale token and matches no row."],
+  ["One channel floods the queue","One run in flight per channel. FIFO is not fair when a single alert channel can put 200 rows ahead of the whole workspace."],
+  ["A forged turn in the transcript","Bodies are flattened before formatting. Attribution lives in the line structure, so a newline used to manufacture a turn from someone who never spoke."],
+  ["Memory crosses a channel","The scope predicate runs inside the query, derived from the channel binding. Post-filtering leaks through result counts and ranking."],
   ["Memory poisoned by a channel member","Nothing is written that a tool did not assert or a human did not confirm. Decay cannot fix a fact that was wrong the day it was written."],
-  ["The model invents a number","The mechanical verifier set-differences every claim token against the evidence corpus and names what failed."],
-  ["The model implies causation","It cannot be checked, so its FORM is constrained: a causal connective must share its sentence with a hedge."],
-  ["The debate never ends","Five independent termination bounds, three of them constants. Rounds, tokens and wall-clock each terminate it alone."],
-  ["The critic rubber-stamps","It never sees the planner's reasoning, only the proposal object — and it gets its own tool budget to check with."],
-  ["Approval fatigue","Only genuinely consequential writes are non-auto, and a write escalates to debate BEFORE the human is asked."],
-  ["An unbounded query kills the datasource","A bare high-cardinality matcher is rejected at dispatch; ranges are clamped by widening the step, never by truncating the window."],
-  ["The specialist is down","A soft deadline, then answer without it and say so. The graph must not fail with a dependency it can survive."],
+  ["The model invents a number","A mechanical set-difference over every claim token, against tool results and the transcript — and never against the model's own prior turns."],
+  ["The debate never ends, or rubber-stamps","Five independent termination bounds, three of them constants. And the critic never sees the planner's reasoning, only its conclusion, with its own budget to check it."],
 ];
 
 const CAP = [
   ["Engineers in workspace","100","Stated input."],
-  ["In Claude-enabled channels","~40","4 channels; not everyone lives in them."],
-  ["Mentions per active user per day","6","Assumption. The number most worth challenging."],
-  ["Runs per day","~240","40 × 6. Ambient adds ~12."],
+  ["Mentions per active user per day","6","An assumption, and the number most worth challenging. Phase 1 exists partly to replace it with a measurement."],
+  ["Runs per day","~240","40 people in Claude-enabled channels × 6. Ambient adds ~12."],
   ["Model calls per run","1 / 2–3 / 4–6","T0 / T1 / T2. Two of the five nodes on the common path run no model at all."],
-  ["Share routed to T2 debate","~20%","Causal wording plus active incidents. Measure it in Phase 1 — this drives the token line below."],
-  ["Peak hour share","18%","~43 runs/hr, so roughly 0.7/min."],
-  ["p95 <i>service</i> time","33s T1 / 58s T2","Time to produce an answer once a worker starts. Both dropped ~5s when the librarian became code and the scribe moved after the post."],
-  ["p95 <i>response</i> time","106s / 48s","What the user actually waits: 1 worker / 2 workers. M/D/c at 0.72/min."],
+  ["p95 <i>service</i> vs <i>response</i>","33s vs 106s / 48s","Service is time to produce an answer once a worker starts. Response is what a person waits: 1 worker / 2 workers, M/D/c at 0.72/min. Queue wait is 2.8× the service figure at one worker, and it was never derived until someone asked."],
   ["Runs/min one worker absorbs<br>before p95 doubles","~0.8","ρ≈0.5. The row that makes every other row actionable."],
   ["Workers to deploy","2 (3 at Phase 3)","Two for load, a third so a rolling restart is not a degradation."],
-  ["LLM tokens per day","~2.9M in / ~0.2M out","240 runs. Was ~3.4M: deleting the librarian's model call removed 18% of every run's spend for no loss, because nothing downstream read its output."],
-  ["Ambient triage tokens/day","~1-2M","Scales with <i>messages</i> seen, not answers posted — plausibly the largest line here."],
-  ["Debate token ceiling","12k / run","Enforced, not requested. A debate with no ceiling is an unbounded bill."],
-  ["Vectors written per day","~480","2 memories per run. Under 200k in a year — Qdrant is not the constraint."],
+  ["LLM tokens per day","~2.9M in / ~0.2M out","Was ~3.4M. Deleting the librarian's model call removed 18% of every run for no loss, because nothing downstream read its output."],
+  ["Ambient triage tokens/day","~1–2M","Scales with <i>messages seen</i>, not answers posted — plausibly the largest line here, and it was missing entirely from the first version of this table."],
   ["Postgres · graph checkpoints","~25 GB / year","A checkpointer serialises full state per node per run. The largest writer in the stack."],
-];
-
-const INTEG = [
-  {h:"Alert channels", v:"read via platform events",
-   l:["Alertmanager and synthetics post into #alerts-prod","Sentinel watches the stream; it is not in the request path","Correlates a firing alert with the deploy that preceded it"],
-   r:"<b>Risk:</b> a noisy alert channel becomes a noisy agent. Ambient stays off here until the trigger rules earn it."},
-  {h:"Grafana", v:"MCP · read-only",
-   l:["list_metrics, query_datasource, error_budget","Ranges clamped to 6h; the step widens rather than the window truncating","A bare high-cardinality matcher is rejected outright"],
-   r:"<b>Risk:</b> an unbounded matcher is a full-cardinality scan. Rejecting it forces list_metrics first."},
-  {h:"Escalation", v:"MCP · PagerDuty",
-   l:["get_oncall, list_incidents are auto","page_oncall is two_person — the only one in the catalogue","Answers name the human, so the reply is actionable"],
-   r:"<b>Risk:</b> paging wakes someone at 3am. It is the one place a second approver is worth the friction."},
-  {h:"Source control", v:"MCP · GitHub",
-   l:["list_deploys, get_config, get_diff for correlation","create_pull_request is always_ask, base and head echoed verbatim","A base that does not exist is rejected before the human is asked"],
-   r:"<b>Risk:</b> a revert PR on the wrong base is plausible and expensive."},
 ];
 
 const PHASES = [
@@ -430,13 +370,9 @@ const PHASES = [
 
 const REVIEW = [
   ["blocker","<b>Debate does not fit the current lease.</b> Eight model calls at a 30s timeout is 300s against a 300s lease — the same class of bug that already put two identical answers in a public channel here. <code>LEASE_SECONDS</code> must go to 600 and the debate must get its own 90s wall-clock budget, in the commit that builds it."],
-  ["blocker","<b>Scope isolation is the whole security model, and it is one predicate.</b> It needs a test that attempts every reachable path — direct query, semantic neighbour, injected instruction, and a tool that could exfiltrate — running in CI, not a manual check before launch."],
+  ["blocker","<b>Scope isolation is the whole security model, and it is one predicate.</b> It needs a test attempting every reachable path — direct query, semantic neighbour, injected instruction, and a tool that could exfiltrate — running in CI, not a manual check before launch."],
   ["high","<b>Debate is unfalsifiable without instrumentation.</b> Ship <code>debate_flip_rate</code>, <code>flip_regret</code> and <code>critic_ablation_delta</code> from day one. If ablating the critic changes nothing, the critic is theatre and a second pass was doing the work."],
-  ["high","<b>The 6-mentions-per-day assumption drives every number here.</b> It is a guess. Phase 1 exists partly to replace it with a measurement."],
-  ["high","<b>The verifier's biggest hole is a false negative, not a false positive.</b> Right tokens, wrong pairing — evidence says 41/s at 15:01, the draft says 41/s at 14:01 — passes. Fixing it needs span-level evidence binding, which is not 45 lines."],
-  ["high","<b>Approval fatigue will defeat always_ask.</b> If every write prompts, people click approve without reading. Only genuinely consequential writes are non-auto, and the prompt must state exactly what changes."],
-  ["watch","<b>A2A adds a dependency with its own availability.</b> The graph answers without the specialist rather than failing with it, and says plainly that it did."],
-  ["watch","<b>Trace volume becomes its own cost.</b> Sample at org-wide scale; keep full traces for errors and for anything a human gave a thumbs-down."],
+  ["high","<b>The verifier's biggest hole is a false negative.</b> Right tokens, wrong pairing, passes. Fixing it needs span-level evidence binding, which is not forty-five lines."],
 ];
 
 function renderArch() {
@@ -473,37 +409,17 @@ function renderArch() {
         ${t.clamps ? `<br><b class="clamp">clamps</b> <code class="dim">${esc(j(t.clamps).replace(/\s+/g, " "))}</code>` : ""}</span>
     </div>`).join("");
 
-  $("cardJson").innerHTML = A2A_CARDS.map(c => pre(`AgentCard · ${c.name}`, j(c), "out")).join("");
-
-  $("protoCards").innerHTML = PROTO.map(p => `
-    <div class="pr-card"><h3>${p.h}</h3><p class="sub">${p.s}</p><p>${p.p}</p>
-      <ul>${p.l.map(x => `<li>${x}</li>`).join("")}</ul></div>`).join("");
+  // The full agent card stays reachable, folded, rather than occupying a section.
+  $("toolTable").insertAdjacentHTML("afterend", A2A_CARDS.map(c =>
+    `<details class="pre-fold card-fold"><summary>A2A AgentCard · ${esc(c.name)} — the full JSON</summary><pre>${esc(j(c))}</pre></details>`).join(""));
 
   const rows = (el, head, data, cls = "") => {
     $(el).innerHTML = `<div class="trow">${head.map(h => `<span>${h}</span>`).join("")}</div>` +
       data.map(r => `<div class="trow">${r.map((c, i) =>
         i === 0 ? `<b>${c}</b>` : i === 1 && cls === "num" ? `<span class="num">${c}</span>` : `<span>${c}</span>`).join("")}</div>`).join("");
   };
-  rows("stackTable", ["Layer", "Choice", "Why"], STACK);
   rows("failTable", ["Failure", "What stops it"], FAILS);
   rows("capTable", ["Quantity", "Value", "Basis"], CAP, "num");
-
-  $("debateSpec").innerHTML = `
-    <div class="dbg">
-      <div><h4>Turn order</h4><p>Planner proposes → Critic attacks → Planner revises. The Critic sees the
-        <b>proposal object only</b>, never the Planner's reasoning, and holds its own budget of
-        <b>${DEBATE.criticCalls} tool calls</b>. An objection it verified outranks one it argued.</p></div>
-      <div><h4>Filtered in code</h4><ul>${DEBATE.filters.map(f => `<li><code>${esc(f.rule)}</code> — ${esc(f.why)}</li>`).join("")}</ul>
-        <p class="dim">Discarded before the Planner sees them, so "cite your source" is a property of the system rather than a politeness the Critic can decline.</p></div>
-      <div><h4>Termination — any one is sufficient</h4><ol>${DEBATE.exits.map(e => `<li><code>${esc(e)}</code></li>`).join("")}</ol>
-        <p class="dim">Rounds is a monotonically increasing integer with a constant ceiling; tokens and wall-clock are monotonic non-decreasing with constant ceilings. Therefore the loop terminates.</p></div>
-      <div><h4>Tie-break — never a default win</h4><ul>${Object.entries(DEBATE.tieBreak).map(([k, v]) => `<li><b>${esc(k)}</b> — ${esc(v)}</li>`).join("")}</ul></div>
-    </div>`;
-
-  $("integCards").innerHTML = INTEG.map(i => `
-    <div class="in-card"><h3>${i.h}</h3><p class="via">${i.v}</p>
-      <ul>${i.l.map(x => `<li>${x}</li>`).join("")}</ul>
-      <p class="risk">${i.r}</p></div>`).join("");
 
   $("phaseCards").innerHTML = PHASES.map(p => `
     <div class="ph"><div class="k">${p.k}</div><b>${p.n}</b><p>${p.p}</p><p class="gate">${p.g}</p></div>`).join("");
@@ -515,7 +431,6 @@ function renderArch() {
 /* ─────────────── boot ─────────────── */
 function boot() {
   renderChannels();
-  renderTiers(null);
   $("faces").innerHTML = ["alice", "bob", "priya", "sam"].map(k =>
     `<i style="background:${P[k].c}">${P[k].i}</i>`).join("");
 
@@ -549,7 +464,7 @@ function boot() {
 
   $("sbText").addEventListener("input", sandboxCheck);
 
-  const tabs = [["tab-sim", "view-sim"], ["tab-arch", "view-arch"], ["tab-plan", "view-plan"]];
+  const tabs = [["tab-arch", "view-arch"], ["tab-sim", "view-sim"]];
   function select(i, focus) {
     tabs.forEach(([t, v], k) => {
       const on = k === i;
