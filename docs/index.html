@@ -43,10 +43,11 @@
 
     <section class="arch-sec">
       <h2>How much machinery a question gets</h2>
-      <p class="sec-note">An earlier review collapsed nine nodes to five and deleted a planner/critic
-      split as the model's own loop hand-rolled with worse adaptivity. That finding is not reversed
-      here — <b>it is the default.</b> Debate is the escalation, and it engages only where the
-      mechanical verifier is structurally blind.</p>
+      <p class="sec-note">Two tiers. A third — a "direct" tier for questions the thread already
+      answers — was deleted once the librarian became code, because it was then just the writer, and
+      a tool-calling model handed the thread simply answers without calling a tool. Same single call.
+      Debate is the only real escalation, and it engages where the mechanical verifier is
+      structurally blind.</p>
       <div class="tiers" id="tierCards"></div>
       <figure class="figure"><img class="diagram" src="diagrams/tiers.svg" alt="The orchestrator's tier predicate routes a causal question or a prior verifier failure to debate, a short question with no tool hint to direct, and everything else to the fast path."></figure>
       <div class="callout">
@@ -60,9 +61,10 @@
 
     <section class="arch-sec">
       <h2>Who owns which decision</h2>
-      <p class="sec-note">One decision each. Open any card for the system prompt it is actually sent —
-      the same string the simulator assembles, read from the same array.</p>
-      <div class="agents" id="agentCards"></div>
+      <p class="sec-note">One decision each, and the interesting number is not eleven. Four of these
+      run no model at all, and two are designs rather than code. Open any card for the system prompt
+      it is actually sent — the same string the simulator assembles, from the same array.</p>
+      <div id="agentCards"></div>
     </section>
 
     <section class="arch-sec">

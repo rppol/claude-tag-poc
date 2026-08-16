@@ -385,7 +385,18 @@ function renderArch() {
       <div class="tr-path">${t.nodes.map(n => `<code>${esc(n)}</code>`).join("<i>→</i>")}</div>
     </div>`).join("");
 
-  $("agentCards").innerHTML = AGENTS.map(a => `
+  const GROUPS = [
+    ["Runs a model", a => a.stage === "core" && a.model !== "none",
+     "Five. Two of them — planner and critic — only on the one run in five that escalates."],
+    ["Code · no model runs", a => a.stage === "core" && a.model === "none",
+     "Four decisions that never needed a model. Each was one until someone asked what read its output."],
+    ["Designed, not in v1", a => a.stage === "later",
+     "Both were reviewed as marginal and both are kept as designs rather than built. The condition that would earn each one is written on its card."],
+  ];
+  $("agentCards").innerHTML = GROUPS.map(([title, pred, note]) => `
+    <h3 class="grp"><span>${title}</span><em>${AGENTS.filter(pred).length}</em></h3>
+    <p class="grp-note">${esc(note)}</p>
+    <div class="agents">` + AGENTS.filter(pred).map(a => `
     <details class="ag-card">
       <summary><i style="background:${a.colour}"></i><b>${esc(a.name)}</b>
         <em>${a.model === "none" ? "no model" : a.model}</em>
@@ -397,7 +408,7 @@ function renderArch() {
       ${pre(a.model === "none" ? "PREDICATE SOURCE — this is the whole agent" : "SYSTEM PROMPT", a.model === "none" ? a.predicate : a.system, "sys")}
       ${a.model === "none" ? "" : pre("USER TURN TEMPLATE", a.userTemplate, "usr")}
       <p class="fails"><b>How it fails:</b> ${esc(a.fails)}</p>
-    </details>`).join("");
+    </details>`).join("") + `</div>`).join("");
 
   $("toolTable").innerHTML =
     `<div class="trow"><span>Tool</span><span>Policy</span><span>Callers</span><span>Params &amp; clamps</span></div>` +

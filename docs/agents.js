@@ -20,14 +20,19 @@
    is not reversed here — it is the DEFAULT. Debate is the escalation.
 
    Five nodes on the common path. Two more on a minority of runs. */
-/* * = no model runs there.  ° = runs after the reply is posted. */
+/* Two tiers, not three. A T0 "direct" tier existed and was deleted: once the
+   librarian became code, T0 was just the writer — and a tool-calling model
+   handed the thread simply answers without calling a tool, which is the same
+   single call T1 makes. The only way to make the saving real is a smaller model
+   for easy questions, and deciding which are easy needs a classifier, which is
+   the Router this design already deleted for answering with silence.
+
+   * = no model runs there.  ° = runs after the reply is posted. */
 const TIERS = [
-  { id: "T0", name: "direct", nodes: ["librarian*", "writer", "verifier"], calls: "1",
-    when: "Answerable from the thread alone — no tool hint, short question." },
-  { id: "T1", name: "fast", nodes: ["librarian*", "executor", "writer", "verifier", "scribe°"], calls: "2–3",
-    when: "The default. This is the five-node design the earlier review arrived at." },
+  { id: "T1", name: "fast", nodes: ["librarian*", "agent", "writer", "verifier", "scribe°"], calls: "2–3",
+    when: "Everything, unless the question is causal or the answer needs a write. The agent decides whether it needs a tool at all — that is what a tool-calling loop is for." },
   { id: "T2", name: "debate", nodes: ["librarian*", "planner", "critic", "writer", "verifier", "scribe°"], calls: "4–6",
-    when: "Causal question, active incident, a non-auto tool, or a verifier rejection on the last pass." },
+    when: "A causal question, a non-auto tool, or a verifier rejection on the last pass. Roughly one run in five." },
 ];
 
 /* The tier predicate. Pure code, no model call — an orchestrator that needed a
@@ -53,9 +58,7 @@ const CAUSAL = /\b(why|root cause|caused|because|correlat|same (issue|cause|thin
 function tierFor(ctx) {
   if (ctx.retryReason === "VERIFY_FAIL")  return { tier: "T2", rule: 'retryReason === "VERIFY_FAIL"', note: "the writer already failed the mechanical check once, so the second pass gets an adversary" };
   if (CAUSAL.test(ctx.question))          return { tier: "T2", rule: `CAUSAL.test(question) === true`, note: "a causal claim is exactly what the verifier cannot check" };
-  if (!ctx.toolHints?.length && ctx.question.length < 160)
-                                          return { tier: "T0", rule: "no tool hints && question.length < 160", note: "the thread already contains the answer" };
-  return { tier: "T1", rule: "(default)", note: "ordinary question, ordinary path" };
+  return { tier: "T1", rule: "(default)", note: "the agent decides for itself whether a tool is needed" };
 }
 
 // Gate B — mid-run. A proposed write escalates BEFORE a human is asked to
@@ -77,7 +80,7 @@ Four rules bind every agent here:
 /* ═══════════════ agents ═══════════════ */
 const AGENTS = [
   {
-    id: "orchestrator", name: "Orchestrator", model: "none", budget: 0, colour: "#A683D6",
+    id: "orchestrator", name: "Orchestrator", model: "none", budget: 0, colour: "#A683D6", stage: "core",
     tier: "all", onPath: true,
     owns: "How much machinery this run gets. It never drops a run.",
     inputs: "queued run + channel binding",
@@ -101,8 +104,8 @@ model to choose a tier would recreate the exact cost it exists to avoid.`,
   },
 
   {
-    id: "librarian", name: "Librarian", model: "none", budget: 0, colour: "#4FD8AA",
-    tier: "T0 T1 T2", onPath: true,
+    id: "librarian", name: "Librarian", model: "none", budget: 0, colour: "#4FD8AA", stage: "core",
+    tier: "T1 T2", onPath: true,
     owns: "What context the rest of the graph sees — and the scope boundary.",
     inputs: "channel binding + question",
     output: `{ memories[], entities[], dropped[] }`,
@@ -134,13 +137,13 @@ enforcement, and a regex that believed otherwise would be worse than no regex.`,
   },
 
   {
-    id: "executor", name: "Agent", model: "large", budget: 12000, colour: "#EDAE55",
+    id: "executor", name: "Agent", model: "large", budget: 12000, colour: "#EDAE55", stage: "core",
     tier: "T1", onPath: true,
     owns: "The next tool call, adapting to what the last one showed.",
     inputs: "context bundle",
     output: `{ findings: [{tool, args, result_id, says}], unresolved: [] }`,
-    tools: ["grafana.list_metrics", "grafana.query_datasource", "grafana.error_budget",
-            "pagerduty.get_oncall", "pagerduty.list_incidents", "pagerduty.page_oncall",
+    tools: ["grafana.list_metrics", "grafana.query_datasource",
+            "pagerduty.get_oncall", "pagerduty.page_oncall",
             "github.list_deploys", "github.get_config", "github.get_diff", "github.create_pull_request"],
     system: `${PREAMBLE}
 
@@ -170,7 +173,7 @@ REMAINING BUDGET: {budget} tokens · {calls} calls`,
   },
 
   {
-    id: "planner", name: "Planner", model: "large", budget: 6000, colour: "#EDAE55",
+    id: "planner", name: "Planner", model: "large", budget: 6000, colour: "#EDAE55", stage: "core",
     tier: "T2", onPath: false,
     owns: "One defensible proposal, written for an adversary.",
     inputs: "context bundle (+ surviving objections from the previous round)",
@@ -208,12 +211,12 @@ EVIDENCE IDS AVAILABLE: {evidence_ids}
   },
 
   {
-    id: "critic", name: "Critic", model: "large", budget: 5000, colour: "#DB6A50",
+    id: "critic", name: "Critic", model: "large", budget: 5000, colour: "#DB6A50", stage: "core",
     tier: "T2", onPath: false,
     owns: "The strongest specific objection — or an honest 'nothing survives'.",
     inputs: "the Proposal OBJECT only (not the planner's reasoning) + the same evidence + 2 tool calls of its own",
     output: `{ objections: [{id, target, kind, severity, evidence_gap, cites}], verdict }`,
-    tools: ["grafana.query_datasource", "github.get_diff", "pagerduty.list_incidents"],
+    tools: ["grafana.query_datasource", "github.get_diff"],
     system: `${PREAMBLE}
 
 YOUR ROLE: Critic, in a debate. You are given a proposal and the same evidence its author had — but NOT their reasoning. Find what is wrong with it.
@@ -226,10 +229,10 @@ Return JSON:
 { "objections": [{"id","target","kind","severity","evidence_gap","cites"}],
   "verdict": "accept"|"revise"|"reject" }
 
-kind ∈ unsupported | contradicted | alternative_unexamined | scope | irreversible | stale
+kind ∈ unsupported | alternative_unexamined | irreversible
 
 Rules:
-- kind "contradicted" REQUIRES a cites value. Without it the runtime discards your objection before the author sees it. This is code, not etiquette.
+- Every objection REQUIRES a cites value — an evidence id, or a tool you actually called. Without one the runtime discards it before the author sees it. This is code, not etiquette.
 - severity "high" means acting on this proposal would cause harm, or the claim rests on nothing in the evidence set. It does not mean you would have phrased it differently.
 - Attack the strongest reading of the proposal, not a weaker restatement of it.
 - If the action is irreversible, say so with kind "irreversible" even when you agree with the reasoning. That routes it to a human, which is correct.
@@ -250,7 +253,7 @@ YOUR TOOL BUDGET: {criticCalls} calls remaining`,
   },
 
   {
-    id: "analyst", name: "Incident Analyst", model: "external", budget: 0, colour: "#DB6A50",
+    id: "analyst", name: "Incident Analyst", model: "external", budget: 0, colour: "#DB6A50", stage: "later",
     tier: "T2", onPath: false,
     owns: "A domain this workspace does not own — the postmortem corpus.",
     inputs: "A2A task: { service, signals[] }",
@@ -278,8 +281,8 @@ demote one that did.`,
   },
 
   {
-    id: "writer", name: "Writer", model: "large", budget: 4000, colour: "#4FD8AA",
-    tier: "T0 T1 T2", onPath: true,
+    id: "writer", name: "Writer", model: "large", budget: 4000, colour: "#4FD8AA", stage: "core",
+    tier: "T1 T2", onPath: true,
     owns: "What the humans actually read.",
     inputs: "evidence + debate outcome",
     output: "Slack mrkdwn, ≤ 800 tokens",
@@ -310,8 +313,8 @@ MEMORIES IN SCOPE: {memories}`,
   },
 
   {
-    id: "verifier", name: "Verifier", model: "none", budget: 0, colour: "#4FD8AA",
-    tier: "T0 T1 T2", onPath: true,
+    id: "verifier", name: "Verifier", model: "none", budget: 0, colour: "#4FD8AA", stage: "core",
+    tier: "T1 T2", onPath: true,
     owns: "Whether an unsupported claim is allowed to reach the channel.",
     inputs: "draft + the evidence corpus",
     output: `{ pass, unsupported[], unhedged[] }`,
@@ -342,7 +345,7 @@ Known holes, stated rather than papered over — see the failure table in the UI
   },
 
   {
-    id: "scribe", name: "Scribe", model: "small", budget: 1500, colour: "#4FD8AA",
+    id: "scribe", name: "Scribe", model: "small", budget: 1500, colour: "#4FD8AA", stage: "core",
     tier: "T1 T2", onPath: false, async: true,
     owns: "What from this run survives it — after the reply is already in the channel.",
     inputs: "run transcript + tool results",
@@ -370,12 +373,12 @@ EXISTING MEMORIES ON THESE SUBJECTS: {memories}`,
   },
 
   {
-    id: "sentinel", name: "Sentinel", model: "small", budget: 800, colour: "#A683D6",
-    tier: "ambient", onPath: false,
+    id: "sentinel", name: "Sentinel", model: "small", budget: 800, colour: "#A683D6", stage: "later",
+    tier: "later", onPath: false,
     owns: "Whether to speak unasked — and far more often, whether not to.",
     inputs: "channel message stream",
     output: `{ act: "post"|"offer"|"stay_silent", why: string }`,
-    tools: ["grafana.list_metrics", "grafana.query_datasource", "pagerduty.list_incidents", "slack.add_reaction"],
+    tools: ["grafana.list_metrics", "grafana.query_datasource", "slack.add_reaction"],
     system: `${PREAMBLE}
 
 YOUR ROLE: Sentinel. You watch a channel you were not tagged in, on the cheapest model available, on every message. You are a filter, not an agent — the expensive graph runs only if you say so.
@@ -397,7 +400,7 @@ BUDGET: {used} of {cap} this week`,
   },
 
   {
-    id: "human_gate", name: "Human gate", model: "none", budget: 0, colour: "#EDAE55",
+    id: "human_gate", name: "Human gate", model: "none", budget: 0, colour: "#EDAE55", stage: "core",
     tier: "T2", onPath: false,
     owns: "Holding the graph open at a checkpoint while a person decides.",
     inputs: "interrupt() from a non-auto tool",
@@ -431,27 +434,28 @@ const DEBATE = {
   // Mechanical objection filters. These run before the planner sees anything,
   // so "cite your source" is a property of the system rather than a politeness
   // the critic can decline.
+  kinds: ["unsupported", "alternative_unexamined", "irreversible"],
   filters: [
-    { rule: 'kind === "contradicted" && !cites', why: "an uncited contradiction is an assertion" },
-    { rule: "target does not resolve to a field of the proposal", why: "an objection to nothing" },
+    { rule: "!cites", why: "an uncited objection is an assertion" },
   ],
 
   // Five independent bounds. Rounds is a monotonically increasing integer with
   // a constant ceiling; tokens and wall-clock are monotonic non-decreasing with
   // constant ceilings. Therefore the loop terminates.
+  // Three bounds. Rounds is a monotonically increasing integer with a constant
+  // ceiling, and the budget is monotonic non-decreasing with one; either
+  // terminates the loop alone. There were five — the wall-clock and token
+  // ceilings were listed separately, which is one idea written twice.
   exits: [
     'verdict === "accept"',
     "no surviving objection has severity high",
-    "round === maxRounds",
-    "debateTokens > maxTokens",
-    "debateWallMs > wallMs",
+    "round === maxRounds, or the budget is spent",
   ],
 
   // No exit is "the planner wins because the loop ended."
   tieBreak: {
-    irreversible: "Do not ship. Route to human_gate rendering BOTH positions and the one test that would settle it.",
-    scope:        "Do not ship. Same treatment — a scope disagreement is a security question.",
-    other:        "Ship downgraded: assertions become hedges, action.kind 'tool' becomes 'answer' proposing the tool, and the objection is attached verbatim as a stated caveat.",
+    irreversible: "Do not ship. Route to human_gate with BOTH positions and the one test that would settle it. A disagreement about an irreversible act is exactly what a human is for.",
+    other:        "Ship downgraded: assertions become hedges, a proposed tool call becomes a proposal, and the surviving objection is attached verbatim as a caveat.",
   },
 
   /* A real defect this creates in the SHIPPED code, recorded rather than

@@ -16,30 +16,6 @@
 const M = (user, at, text) => ({ user, at, text });
 
 const FLOWS = [
-  /* ─────────── 1 · T0, the tier that spends nothing ─────────── */
-  {
-    id: "direct", name: "Direct answer", desc: "T0 — the thread already holds it",
-    impl: "design", why: "the tier predicate and verifier are real code here; no model runs",
-    channel: "incidents", scope: "eng-claude", asker: "sam",
-    question: "<@Claude> what version are we on for checkout right now?",
-    thread: [
-      M("bob", "14:03", "rolled checkout-api v2.3.1 at 14:01"),
-      M("sam", "14:05", "<@Claude> what version are we on for checkout right now?"),
-    ],
-    proves: "The orchestrator does not spend tools on everything. Two model calls, no tool loop, no scribe.",
-    run(rt) {
-      rt.tier({ toolHints: [] });
-      const ctx = rt.library({ because: "no tool hint and the question is 63 chars — the transcript is the whole evidence set" });
-      const draft = rt.think("writer", {
-        user: rt.sc.asker, question: rt.sc.question, results: "(none — transcript only)",
-        debate: "(no debate — T0)", memories: "(none)",
-      }, "`checkout-api` is on *v2.3.1*, deployed at 14:01 by @bob.\n\nThat is from this thread rather than from the deploy system — I did not check whether the rollout finished.",
-        { because: "no tool ran, so the answer names the thread as its source and the rollout as unchecked rather than implying it verified anything" });
-      rt.check(draft);
-      return draft;
-    },
-  },
-
   /* ─────────── 2 · T1, the common path ─────────── */
   {
     id: "fast", name: "Fast path", desc: "T1 — five nodes, adaptive tool loop",
@@ -77,12 +53,6 @@ const FLOWS = [
 
       rt.tool("executor", "pagerduty.get_oncall", { team: "payments" },
         { because: "an answer that does not name a human is not actionable" });
-
-      rt.tool("executor", "pagerduty.list_incidents", { service: "checkout-api", status: "triggered" },
-        { because: "check whether this is already being handled before telling someone to start" });
-
-      rt.tool("executor", "grafana.error_budget", { service: "checkout-api" },
-        { because: "how much room is left decides whether this is a fix-forward or a rollback" });
 
       rt.think("executor", {
         question: rt.sc.question, entities: "checkout-api, 14:02, 500s",
@@ -392,7 +362,7 @@ const FLOWS = [
 
   /* ─────────── 8 · A2A, earning its card ─────────── */
   {
-    id: "a2a", name: "A2A long task", desc: "input-required, and it outlives the worker",
+    id: "a2a", name: "A2A long task", stage: "later", desc: "input-required, and it outlives the worker",
     impl: "design", why: "the card is real JSON; the lifecycle is scripted",
     channel: "incidents", scope: "eng-claude", asker: "alice",
     question: "<@Claude> do a full correlation against every checkout postmortem we have",
@@ -435,7 +405,7 @@ const FLOWS = [
 
   /* ─────────── 9 · ambient ─────────── */
   {
-    id: "ambient", name: "Ambient", desc: "offer, not post",
+    id: "ambient", name: "Ambient", stage: "later", desc: "offer, not post",
     impl: "design", why: "no sentinel, no trigger rules, no budget exist",
     channel: "platform", scope: "eng-claude", asker: "bob",
     question: "anyone know why the nightly ETL is 40 minutes late?",

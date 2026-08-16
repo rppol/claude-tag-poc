@@ -616,3 +616,8 @@ h2,h3,.sub-h{text-wrap:balance}
   .runtime{padding-bottom:8px}
 }
 .sc-n b{margin-right:8px}
+.grp{display:flex;align-items:baseline;gap:10px;margin:30px 0 4px;font-size:15px;color:#fff;font-weight:600}
+.grp:first-child{margin-top:0}
+.grp em{font-style:normal;font-family:var(--code);font-size:11px;color:var(--mint);
+  border:1px solid color-mix(in srgb,var(--mint) 32%,transparent);border-radius:99px;padding:1px 8px}
+.grp-note{margin:0 0 14px;font-size:13px;color:var(--mono-dim);max-width:62ch;line-height:1.55}

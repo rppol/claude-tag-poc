@@ -237,17 +237,6 @@ const TOOLS = [
       return { ok: true, data: { metrics: keys.map(k => ({ expr: k, unit: WORLD.series[k].unit })) } };
     },
   },
-  {
-    server: "grafana", name: "error_budget", kind: "read", policy: "auto",
-    desc: "Error budget consumption for a service over its current SLO window.",
-    callers: ["executor"],
-    params: { type: "object", required: ["service"], properties: { service: str() } },
-    run(a) {
-      const b = WORLD.errorBudget[a.service];
-      return b ? { ok: true, data: { service: a.service, ...b } }
-               : { ok: false, error: `no error budget configured for ${a.service}` };
-    },
-  },
 
   /* ── PagerDuty ───────────────────────────────────────────── */
   {
@@ -259,17 +248,6 @@ const TOOLS = [
       const o = WORLD.oncall[a.team];
       return o ? { ok: true, data: { team: a.team, handle: o.handle, policy: o.policy, until: hhmm(o.until) } }
                : { ok: false, error: `no schedule for team ${a.team}` };
-    },
-  },
-  {
-    server: "pagerduty", name: "list_incidents", kind: "read", policy: "auto",
-    desc: "Open incidents, optionally filtered by service.",
-    callers: ["executor", "critic", "sentinel"],
-    params: { type: "object", properties: { service: str(), status: str({ enum: ["triggered", "acknowledged", "resolved"] }) } },
-    run(a) {
-      const r = WORLD.incidents.filter(i =>
-        (!a.service || i.service === a.service) && (!a.status || i.status === a.status));
-      return { ok: true, data: { incidents: r.map(i => ({ ...i, opened: hhmm(i.opened) })) } };
     },
   },
   {

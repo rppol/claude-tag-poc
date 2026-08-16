@@ -1,25 +1,22 @@
 flowchart TB
   IN(["@Claude mentioned"]) --> LIB["<b>librarian</b> — no model<br/><small>fetch thread · retrieve inside the scope predicate<br/>· extract entities with the verifier's own extractor</small>"]
-  LIB --> P{"tier predicate<br/><small>pure code — no model call</small>"}
+  LIB --> P{"tier predicate<br/><small>pure code, no model call, no drop edge</small>"}
 
-  P -->|"retryReason == VERIFY_FAIL"| T2
-  P -->|"CAUSAL.test(question)"| T2["<b>T2 · debate</b> — 4-6 calls<br/><small>planner ⇄ critic → writer</small>"]
-  P -->|"no tool hint<br/>and < 160 chars"| T0["<b>T0 · direct</b> — 1 call<br/><small>writer</small>"]
-  P -->|"otherwise"| T1["<b>T1 · fast</b> — 2-3 calls<br/><small>agent tool loop → writer</small>"]
+  P -->|"CAUSAL.test(question)"| T2["<b>T2 · debate</b> — 4-6 model calls<br/><small>planner ⇄ critic → writer</small>"]
+  P -->|"the last draft failed<br/>the verifier"| T2
+  P -->|"otherwise"| T1["<b>T1</b> — 2-3 model calls<br/><small>agent tool loop → writer</small>"]
 
-  T1 -.->|"Gate B: a proposed tool<br/>whose policy is not auto"| T2
+  T1 -.->|"a proposed tool whose<br/>policy is not auto"| T2
 
-  T0 --> V{"<b>verifier</b> — no model<br/><small>set-difference over claim tokens</small>"}
-  T1 --> V
+  T1 --> V{"<b>verifier</b> — no model<br/><small>set-difference over claim tokens</small>"}
   T2 --> V
   V -->|"unsupported"| T1
   V -->|"clean"| POST(["post to thread"])
   POST -.->|"off the critical path —<br/>the person is already reading"| SC["<b>scribe</b><br/><small>what survives this run</small>"]
 
-
   classDef mech stroke:#EDAE55,fill:#33281A,color:#F0DEC0
   classDef design stroke:#9578C4,fill:#241D31,color:#C6B9D9,stroke-dasharray:5 4
   classDef built stroke:#4FD8AA,fill:#16332B,color:#DCEFE8,stroke-width:1.5px
   class P,LIB,V mech
-  class T0,T1,T2,SC design
+  class T1,T2,SC design
   class IN,POST built

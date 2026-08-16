@@ -230,7 +230,6 @@ ok(a2a.some(s => /restart/i.test(s.head || "")), "the task outlives the worker")
 ok(A2A_CARDS.every(c => c.skills.length && c.url && c.securitySchemes), "the card carries skills, endpoint and auth");
 
 console.log("\ntiers");
-ok(FLOW.direct._spans[0].head.startsWith("T0"), "a short factual question routes T0");
 // This slot used to assert "an active incident routes T2 by channel state" —
 // and it was PROTECTING a contradiction: fast and reject were routed T2, the
 // runtime panel painted the six-node debate path beside them, and neither ran
@@ -245,10 +244,11 @@ for (const f of FLOWS) {
      `${f.id}: routed ${route ? route.head.split(" ")[0] : "—"} and ${debates ? "debates" : "does not debate"}`,
      "the tier lane and the executed run disagree");
 }
-ok(tierFor({ question: "why did checkout break", toolHints: [], incidentActive: false }).tier === "T2",
+ok(tierFor({ question: "why did checkout break", toolHints: [] }).tier === "T2",
    "a causal question routes T2 on wording alone");
-ok(tierFor({ question: "what version is checkout on", toolHints: [], incidentActive: false }).tier === "T0",
-   "the same-length factual question does not");
+ok(tierFor({ question: "what version is checkout on", toolHints: [] }).tier === "T1",
+   "the same-length factual question does not — it goes to the agent, which decides whether it needs a tool");
+ok(TIERS.length === 2, `two tiers, not three (${TIERS.map(t => t.id).join(" ")})`);
 
 console.log(`\n${n - fails}/${n} checks passed`);
 if (fails) { console.log(`${fails} FAILED\n`); process.exit(1); }

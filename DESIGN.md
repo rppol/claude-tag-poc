@@ -450,3 +450,56 @@ prompt originally gave.
 The ack seam and the queue, because they are the premise. The scope predicate,
 because it is the security model. Dedupe, lease and post-fencing, because they are
 correctness under concurrency. And the Verifier, because it costs nothing.
+
+
+---
+
+## 11 · The second cut: what the agent layer stopped needing
+
+§10 removed work that nothing consumed. This pass removed *specification* —
+structure that existed because it was specifiable, not because anything turned
+on it.
+
+| | before | after |
+|---|---|---|
+| tiers | 3 | **2** |
+| agents, undifferentiated | 11 | **5 that run a model, 4 code steps, 2 deferred** |
+| MCP tools | 13 | **11** |
+| debate objection kinds | 6 | **3** |
+| debate termination bounds | 5 | **3** |
+
+**T0 is gone.** Once the librarian became code, T0 was just the writer — and a
+tool-calling model handed the thread answers without calling a tool, which is
+the same single call T1 makes. The saving was illusory. Making it real needs a
+smaller model for "easy" questions, and deciding which are easy needs a
+classifier, which is the Router this design deleted for answering with silence.
+The orchestrator is now one boolean: escalate, or don't.
+
+**Eleven agents was never the honest number.** Four of them run no model at all —
+the orchestrator is a regex, the librarian is a retrieval step, the verifier is
+a set-difference, the human gate is an interrupt. Two more are designs that two
+separate reviews called marginal, kept as designs with the condition that would
+earn them written on the card. What actually runs a model on a normal request is
+**three**: agent, writer, scribe. Planner and critic join on the one run in five
+that escalates.
+
+**Two tools were deleted for a reason worth naming.** `grafana.error_budget` and
+`pagerduty.list_incidents` existed because a coverage check wanted every
+catalogued tool exercised, so I had added calls to a flow to satisfy it. That is
+the check driving the design rather than measuring it — the same failure as a
+test written to pass, one level up. The check stays; the tools that only existed
+to feed it do not.
+
+**The debate protocol lost half its specification.** Six objection kinds became
+three, because `contradicted`, `scope` and `stale` were never distinguished by
+any code path — they were vocabulary. Five termination bounds became three: the
+token ceiling and the wall-clock ceiling are one idea, a budget, written twice.
+
+The remaining shape is small enough to hold in your head:
+
+```
+ack → queue → librarian (code) → agent ⇄ tools → writer → verifier (code) → post
+                                   ↓ causal question, or a write
+                              planner ⇄ critic
+                                                              post → scribe (async)
+```
