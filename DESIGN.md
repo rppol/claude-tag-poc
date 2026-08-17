@@ -601,3 +601,30 @@ scenarios.
 It **suggests, and never grants**. If it names a server the agent is not permitted to use, the call
 still fails at dispatch against an allowlist the router has no access to. That separation is what
 keeps a compromised or confused router from being an escalation path.
+
+
+### The same audit, run over every scenario
+
+Applying the rule to all five found three more decisions on the wrong side. Each was code making a
+judgement, and each was silently making it badly.
+
+**`calendar.find_slot` chose the meeting.** It returned the first window where nobody was busy.
+That reads like a lookup and is not one: "first available" is a judgement, and it was the wrong one
+here. Every person carries a timezone and the tool never read it, so it proposed 17:00 to an
+attendee for whom that is **21:30**. Availability and local time are facts, so they are computed —
+the tool now returns every candidate with what the clock says for each attendee and which of them
+are outside working hours. Which one to actually ask people to attend is a judgement, so the model
+picks, the approval prompt shows the local times, and the reply says plainly that it booked the
+earliest of four equally late options rather than choosing an evening for someone.
+
+**Instruction-shaped text was detected by a regex.** Whether a sentence is an instruction to the
+agent or something said to the room is a reading, not a pattern match. The router does it now and
+the regex is the fallback. Flagging was never the control in either version — the allowlist is —
+but a regex that believed it was reading intent is the kind of thing that gets trusted later.
+
+**Provenance was asserted and never checked.** The Scribe wrote `provenance: "tool:github.get_config"`
+and nothing confirmed that tool had run. Where a claim came from is a fact, so it is verified now:
+every citation must resolve to a tool that was actually called in this run or a human who actually
+spoke in this thread. A memory whose provenance cannot be checked is unfalsifiable later, which is
+precisely what the design says makes a bad memory permanent — so the one field that exists to make
+memories auditable was itself unaudited.

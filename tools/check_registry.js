@@ -123,6 +123,9 @@ console.log("\nthe five use cases each show what they claim to");
   const writes = rm.filter(s => s.kind === "memwrite");
   ok(writes.length >= 2, "remember: memories are written");
   ok(writes.every(s => s.rows.every(r => r.provenance)), "remember: every row carries provenance");
+  ok(writes.every(s => s.badProv.length === 0),
+     "remember: every provenance resolves to a tool that ran or a human who spoke",
+     writes.flatMap(s => s.badProv).map(b => b.cite).join(", "));
   ok(writes.some(s => s.clashes.length > 0), "remember: a contradiction on the same subject is flagged, not merged");
   const mine = rm.find(s => s.kind === "vector" && !/as /.test(s.label) && s.hits.length);
   const theirs = rm.find(s => /as sales-claude/.test(s.label));
@@ -137,6 +140,35 @@ for (const f of FLOWS) {
   const failed = checks.filter(c => !c.ok);
   ok(failed.length === 0, `${f.id}: ${checks.length} verifier run(s), all pass`,
      failed.map(c => c.head).join(" | "));
+}
+
+console.log("\njudgement on a model, rules and facts in code");
+{
+  // find_slot returns options and local times; it does not choose. "First
+  // available" is a judgement, and the old version made it silently — and
+  // wrongly, proposing 17:00 to someone for whom that is 21:30.
+  const cx2 = { agent: "executor", scope: "eng-claude", channel: "incidents", thread: [], approved: new Set() };
+  const fs = callTool("calendar.find_slot", { attendees: ["alice", "bob", "priya"], minutes: 30, after: "15:00", limit: 4 }, cx2);
+  ok(Array.isArray(fs.data.candidates) && fs.data.candidates.length > 1,
+     `find_slot returns ${fs.data.candidates.length} candidates rather than choosing one`);
+  ok(fs.data.candidates.every(c => c.local && Object.keys(c.local).length === 3),
+     "and every candidate carries each attendee's local time");
+  ok(fs.data.candidates[0].outside_working_hours.includes("priya"),
+     "21:30 for Asia/Kolkata is surfaced as outside working hours");
+  const gate = FLOW.writeup._spans.find(s => s.approval);
+  ok(/21:30/.test(gate.detail) && /outside working hours/.test(gate.detail),
+     "the human sees the local times before approving the booking");
+
+  // Provenance is a fact about where a claim came from, so it is verified.
+  const probe = new Run(FLOW.remember, () => {});
+  probe.route({ classify: '{"tier":"T1","signals":[],"servers":[],"needs_memory":false,"memory_query":"","content_flags":[],"reply_style":"answer","reason":"p"}' });
+  let bad = null;
+  const p2 = new Run(FLOW.remember, s => { if (s.kind === "memwrite") bad = s; });
+  p2.route({ classify: '{"tier":"T1","signals":[],"servers":[],"needs_memory":false,"memory_query":"","content_flags":[],"reply_style":"answer","reason":"p"}' });
+  p2.memWrite([{ subject: "x", predicate: "y", kind: "resolution", text: "t",
+                 provenance: "tool:grafana.query_datasource", confirmed_by: null }], {});
+  ok(bad && bad.badProv.length === 1 && /was not called/.test(bad.badProv[0].why),
+     "a provenance naming a tool that never ran is caught");
 }
 
 console.log("\nthe verifier rejects, and can be shown to");

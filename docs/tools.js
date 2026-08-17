@@ -83,11 +83,14 @@ const WORLD = {
       labels: ["bug", "config"], opened_by: "priya", state: "open" },
   ],
 
+  // `offset` is minutes from the workspace clock. It exists because the tz
+  // string alone was decorative: find_slot read free/busy and ignored where
+  // people are, so it proposed 17:00 to someone for whom that is 21:30.
   people: {
-    alice: { email: "alice@acme.internal", tz: "Europe/London" },
-    bob:   { email: "bob@acme.internal",   tz: "Europe/London" },
-    priya: { email: "priya@acme.internal", tz: "Asia/Kolkata" },
-    sam:   { email: "sam@acme.internal",   tz: "Europe/London" },
+    alice: { email: "alice@acme.internal", tz: "Europe/London", offset: 0 },
+    bob:   { email: "bob@acme.internal",   tz: "Europe/London", offset: 0 },
+    priya: { email: "priya@acme.internal", tz: "Asia/Kolkata",  offset: 270 },
+    sam:   { email: "sam@acme.internal",   tz: "Europe/London", offset: 0 },
   },
 
   // Free/busy, so a proposed slot is derived rather than invented.
@@ -390,21 +393,36 @@ const TOOLS = [
   /* ── Calendar and mail: the two writes a human most wants to see first ── */
   {
     server: "calendar", name: "find_slot", kind: "read", policy: "auto",
-    desc: "First slot where every attendee is free. Derived from free/busy, never guessed.",
+    desc: "Every slot where all attendees are free, with what the clock says for each of them. Returns candidates — it does not choose.",
     callers: ["executor"],
-    params: { type: "object", required: ["attendees", "minutes"],
+    params: {
+      type: "object", required: ["attendees", "minutes"],
       properties: { attendees: { type: "array", items: str() }, minutes: num({ minimum: 15, maximum: 120 }),
-                    after: str({ pattern: "^\\d{2}:\\d{2}$" }) } },
+                    after: str({ pattern: "^\\d{2}:\\d{2}$" }), limit: num({ minimum: 1, maximum: 8 }) },
+    },
+    clamps: { search_until: "19:00", max_candidates: 8 },
+    // This tool used to return ONE slot: the first where nobody was busy. That
+    // reads like a lookup and is not one — "first available" is a judgement,
+    // and it is usually the wrong one. It proposed 17:00 to an attendee for
+    // whom that is 21:30, because free/busy said free and nothing asked where
+    // she was. Availability and local time are facts, so they are computed
+    // here. Which slot to actually ask people to attend is a judgement, so it
+    // is returned as options and the model picks.
     run(a) {
       const unknown = a.attendees.filter(x => !WORLD.people[x]);
       if (unknown.length) return { ok: false, error: `unknown attendees: ${unknown.join(", ")}` };
-      const len = a.minutes * 60;
-      for (let start = t((a.after || "15:00") + ":00"); start < t("19:00:00"); start += 900) {
+      const len = a.minutes * 60, out = [];
+      for (let start = t((a.after || "09:00") + ":00"); start < t("19:00:00") && out.length < (a.limit || 4); start += 900) {
         const clash = a.attendees.some(x => (WORLD.busy[x] || []).some(([s2, e2]) => start < e2 && start + len > s2));
-        if (!clash) return { ok: true, data: { start: hhmm(start), end: hhmm(start + len),
-          attendees: a.attendees.map(x => WORLD.people[x].email) } };
+        if (clash) continue;
+        const local = Object.fromEntries(a.attendees.map(x => [x, hhmm(start + WORLD.people[x].offset * 60)]));
+        const hours = a.attendees.map(x => Math.floor((start + WORLD.people[x].offset * 60) / 3600));
+        out.push({ start: hhmm(start), end: hhmm(start + len), local,
+                   outside_working_hours: a.attendees.filter((x, i) => hours[i] < 9 || hours[i] >= 18) });
       }
-      return { ok: false, error: "no common slot before 19:00" };
+      return out.length
+        ? { ok: true, data: { candidates: out, tz: Object.fromEntries(a.attendees.map(x => [x, WORLD.people[x].tz])) } }
+        : { ok: false, error: "no window before 19:00 where all attendees are free" };
     },
   },
   {

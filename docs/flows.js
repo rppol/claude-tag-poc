@@ -32,7 +32,7 @@ const FLOWS = [
       rt.accept("e_401");
       rt.route({ classify: `{"tier":"T1","signals":[],
  "servers":["slack","memory","grafana","github","pagerduty"],
- "needs_memory":true,
+ "needs_memory":true,"content_flags":[],
  "memory_query":"checkout-api 5xx errors elevated deploy retry config","reply_style":"answer",
  "reason":"a where-do-I-start question. It asks what to look at, not what caused what — the answer will be a set of lookups, and the verifier can check every one of them. Memory is worth reading because this channel has seen checkout incidents before."}` });
       const ctx = rt.library({ because: "the thread names a service and a rough time, and nothing else" });
@@ -95,7 +95,7 @@ const FLOWS = [
       rt.accept("e_402");
       rt.route({ classify: `{"tier":"T1","signals":["IRREVERSIBLE"],
  "servers":["slack","github","grafana","calendar","email"],
- "needs_memory":false,"memory_query":"","reply_style":"answer",
+ "needs_memory":false,"content_flags":[],"memory_query":"","reply_style":"answer",
  "reason":"mail and a calendar invite are both irreversible, but priya asked for them directly — an explicit instruction is not a recommendation to argue with, so the policy gate is the right control here rather than a debate. Memory is skipped: a writeup states what shipped and what a metric read, and both are looked up fresh."}` });
       const ctx = rt.library({ because: "a writeup is assembled from what the incident established, so the recall matters more than the last message" });
 
@@ -107,10 +107,18 @@ const FLOWS = [
         { expr: 'rate(http_5xx{service="checkout-api"}[5m])', from: "13:40", to: "14:10", step: 60 },
         { because: "the same for the numbers: fetch them again rather than quoting the thread" });
 
-      const slot = rt.tool("executor", "calendar.find_slot",
-        { attendees: ["alice", "bob", "priya"], minutes: 30, after: "15:00" },
-        { because: "propose a time that exists rather than inventing one",
-          then: "alice is busy 15:00–16:00 and priya 16:00–17:00, so the first slot all three are free is computed, not guessed" });
+      const slots = rt.tool("executor", "calendar.find_slot",
+        { attendees: ["alice", "bob", "priya"], minutes: 30, after: "15:00", limit: 4 },
+        { because: "get the options and what the clock says for each attendee — availability and local time are facts",
+          then: "every candidate today is 21:30 or later for priya. The tool does not choose; that is the next span's job." });
+
+      rt.think("executor", { question: "which slot?", entities: "alice, bob, priya",
+        results: fmtResults(rt.results), budget: 12000 - rt.tokIn, calls: rt.calls },
+        `{"findings":[{"tool":"calendar.find_slot","result_id":"ev_3","says":"4 candidates, all outside working hours for priya"}],
+ "choice":"17:00","unresolved":["21:30 is late for priya; surface it in the approval rather than deciding for her"]}`,
+        { head: "picks 17:00, and flags why it is not a good pick",
+          because: "free/busy says all four are available, so a lookup would have taken the first and stopped. Whether to ask someone to join at 21:30 is not a lookup — it is the earliest of four equally late options, and the person it affects should see that before it is booked." });
+      const slot = { data: slots.data.candidates[0] };
 
       // Both writes come back as policy refusals first. That is the gate.
       const ev = rt.tool("executor", "calendar.create_event",
@@ -121,7 +129,10 @@ const FLOWS = [
 
       rt.emit({ kind: "gate", agent: "human_gate", label: "interrupt()", ms: 0,
         head: "graph paused · state checkpointed",
-        detail: "calendar.create_event\ntitle: Checkout 5xx review\nstart: " + slot.data.start + " · 30 min\ninvitees: alice, bob, priya\n\nThe worker is free while this waits. The pause is a row, not a blocked thread.",
+        detail: "calendar.create_event\ntitle: Checkout 5xx review\nstart: " + slot.data.start + " · 30 min\n\n" +
+                Object.entries(slot.data.local).map(([who, at]) =>
+                  `  ${who.padEnd(6)} ${at}${slot.data.outside_working_hours.includes(who) ? "   ← outside working hours" : ""}`).join("\n") +
+                "\n\nThe worker is free while this waits. The pause is a row, not a blocked thread.",
         approval: { tool: "calendar.create_event", args: { title: "Checkout 5xx review", start: slot.data.start, minutes: 30 } },
         fixture: null });
       rt.db("UPDATE · checkpoint", {
@@ -151,8 +162,8 @@ const FLOWS = [
 
       const draft = rt.think("writer", { user: rt.sc.asker, question: rt.sc.question,
         results: fmtResults(rt.results), debate: "(no debate)", memories: fmtMem(ctx.memories) },
-        `Done — both after you approved them.\n\n• *Checkout 5xx review* at 17:00 for 30 minutes, the first slot Alice, Bob and Priya are all free. Event \`evt_5512\`.\n• Summary mailed to the same three, subject "Checkout 5xx on 2026-08-14 — what happened".\n\nThe mail says \`v2.3.1\` went out at 14:01 and set \`retry.max_attempts\` to 0, and that the rate went 0.2 → 41 req/s at 14:01:40.`,
-        { because: "the reply confirms exactly what was written and to whom — a person who approved a write should be able to check it happened as described without opening another tab" });
+        `Done — both after you approved them.\n\n• *Checkout 5xx review* at 17:00 for 30 minutes. Event \`evt_5512\`.\n• Summary mailed to the same three, subject "Checkout 5xx on 2026-08-14 — what happened".\n\n*One thing worth knowing:* 17:00 is 21:30 for @priya, and every other slot today was later still. I booked the earliest rather than choosing an evening for her — say the word and I will move it to tomorrow.\n\nThe mail says \`v2.3.1\` went out at 14:01 and set \`retry.max_attempts\` to 0, and that the rate went 0.2 → 41 req/s at 14:01:40.`,
+        { because: "the reply confirms what was written and to whom, and carries the one fact the booking hides: it is late for one of the three, and there was no better option today" });
       rt.check(draft);
       rt.settle();
       return draft;
@@ -174,7 +185,7 @@ const FLOWS = [
       rt.accept("e_403");
       rt.route({ classify: `{"tier":"T2","signals":["CAUSAL","IRREVERSIBLE"],
  "servers":["slack","memory","github"],
- "needs_memory":true,
+ "needs_memory":true,"content_flags":[],
  "memory_query":"checkout-api retry max_attempts default pool sizing","reply_style":"answer",
  "reason":"two reasons at once. 'why is max_attempts allowed to be 0 at all' asks about cause, which the verifier cannot check. And the fix is a commit, which it cannot see. Both of its blind spots in one question."}` });
       const ctx = rt.library({ because: "the ask names an issue number, so the issue is the context — not the metrics" });
@@ -262,7 +273,7 @@ const FLOWS = [
       rt.accept("e_404");
       rt.route({ classify: `{"tier":"T1","signals":[],
  "servers":["slack","grafana","scheduler"],
- "needs_memory":false,"memory_query":"","reply_style":"ack_then_work",
+ "needs_memory":false,"content_flags":[],"memory_query":"","reply_style":"ack_then_work",
  "reason":"nothing to decide yet — the question is about a measurement that does not exist for another hour. Acknowledge now, do the work later. Nothing in memory helps: what 'held' means is a metric read, not a recollection."}` });
       const ctx = rt.library({ because: "the ask is about something that has not happened yet, so the useful context is what 'held' would mean" });
 
@@ -350,7 +361,7 @@ const FLOWS = [
       rt.accept("e_405");
       rt.route({ classify: `{"tier":"T1","signals":[],
  "servers":["slack","memory","github"],
- "needs_memory":true,
+ "needs_memory":true,"content_flags":[],
  "memory_query":"checkout-api retry max_attempts pool.max lessons resolutions","reply_style":"answer",
  "reason":"a write to memory, which means reading it first — a duplicate is worse than nothing, and a contradiction has to be found before it can be flagged."}` });
       const ctx = rt.library({ because: "before writing anything, see what is already known — a duplicate memory is worse than none" });

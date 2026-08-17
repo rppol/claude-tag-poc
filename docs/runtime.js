@@ -238,6 +238,21 @@ class Run {
     // A contradiction on the same (subject, predicate) is flagged, never merged:
     // near-identical embeddings with opposite meanings is exactly the case a
     // similarity threshold gets wrong.
+    // Every provenance is checked against what actually happened in this run:
+    // the tool has to have been called, the human has to have spoken. A claim
+    // about where a fact came from is a fact, so it is verified rather than
+    // trusted.
+    const ran = new Set(this.results.map(r => r.name));
+    const spoke = new Set(this.thread.map(m => m.user));
+    const badProv = [];
+    for (const r of rows) {
+      for (const cite of String(r.provenance || "").split("+").map(x => x.trim()).filter(Boolean)) {
+        const t = cite.match(/^tool:(.+)$/), h = cite.match(/^human:<@(\w+)>$/);
+        if (t && !ran.has(t[1])) badProv.push({ id: r.id, cite, why: `${t[1]} was not called in this run` });
+        else if (h && !spoke.has(h[1])) badProv.push({ id: r.id, cite, why: `${h[1]} did not speak in this thread` });
+        else if (!t && !h && !/^(thread|PM-|github):/.test(cite)) badProv.push({ id: r.id, cite, why: "unrecognised provenance form" });
+      }
+    }
     const clashes = rows.flatMap(r => WORLD.memories
       .filter(m => m.scope_id === r.scope_id && m.subject === r.subject && m.predicate && m.predicate === r.predicate)
       .map(m => ({ existing: m.id, incoming: r.id, subject: r.subject, predicate: r.predicate })));
@@ -247,8 +262,9 @@ class Run {
     this.ms += ms;
     this.emit({
       kind: "memwrite", agent: "scribe", label: "memory.upsert", ms,
-      head: `${rows.length} written to ${this.scope}` + (clashes.length ? ` · ${clashes.length} contradiction flagged` : ""),
-      rows, clashes, model: "text-embedding-3-small", dims: 1536,
+      head: `${rows.length} written to ${this.scope}` + (clashes.length ? ` · ${clashes.length} contradiction flagged` : "")
+            + (badProv.length ? ` · ${badProv.length} provenance UNVERIFIED` : ""),
+      rows, clashes, badProv, model: "text-embedding-3-small", dims: 1536,
       preview: vecPreview(rows[0].text),
       because: opts.because, fixture: null,
     });
@@ -354,12 +370,15 @@ class Run {
       ? this.plan.memory_query
       : [ask, recent, ...ents].join(" ").slice(0, 300);
 
-    // Instruction-shaped text is FLAGGED here and enforced nowhere here — the
-    // allowlist is the enforcement. A regex that thought it was a security
-    // control would be worse than no regex.
+    // Whether a sentence is an instruction is a READING, not a pattern match,
+    // so the router does it and this regex is only the fallback. Either way it
+    // is flagging and not enforcement — the allowlist is the control, and a
+    // regex that believed otherwise would be worse than no regex.
     const INJ = /\b(ignore (all )?(your |the )?previous instructions|disregard the above|system prompt|list every memory|reveal your)\b/i;
-    const dropped = this.thread.filter(m => INJ.test(m.text))
-      .map(m => ({ from: m.user, text: (m.text.match(INJ) || [])[0], why: "instruction-shaped text in an untrusted transcript — reported as content, never obeyed" }));
+    const dropped = (this.plan && this.plan.content_flags)
+      ? this.plan.content_flags
+      : this.thread.filter(m => INJ.test(m.text))
+          .map(m => ({ from: m.user, text: (m.text.match(INJ) || [])[0], why: "fallback regex — instruction-shaped text, reported as content" }));
 
     const mems = this.recall(query, { because: `entities extracted from the thread by tokensOf(): ${ents.slice(0, 6).join(", ") || "none"}` });
 
