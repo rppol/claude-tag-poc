@@ -635,3 +635,30 @@ h2,h3,.sub-h{text-wrap:balance}
   border-top:1px solid var(--ink-2);padding-top:9px}
 .span.k-db .kd{background:var(--mono-quiet);color:var(--ink)}
 .span.k-memwrite .kd{background:var(--mint);color:var(--ink)}
+
+/* ── capability strip ──────────────────────────────────────
+   A span reading "TOOL" never said which protocol, so there was no way to tell
+   that every one of them is an MCP call — or that A2A is genuinely absent from
+   four of the five scenarios rather than hidden somewhere. Six chips, lit or
+   dim, and clicking one filters the trace to it. */
+.caps{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px}
+.cap{display:flex;align-items:baseline;gap:5px;padding:4px 9px;border-radius:999px;
+  border:1px solid var(--ink-3);background:var(--ink-2);font-family:var(--code);font-size:10px;
+  transition:border-color .12s,background .12s}
+.cap b{font-family:var(--code);font-weight:600;font-size:10px}
+.cap i{font-style:normal;font-size:9.5px}
+.cap.on{color:var(--mono);border-color:color-mix(in srgb,var(--mint) 30%,var(--ink-3))}
+.cap.on b{color:#fff}
+.cap.on i{color:var(--mint)}
+.cap.on:hover{background:var(--ink-3);border-color:var(--mint)}
+.cap.off{color:var(--mono-quiet);opacity:.5;cursor:default}
+.cap.off b{color:var(--mono-quiet)}
+.cap.sel{background:var(--ink-4);border-color:var(--mint)}
+.cap.all{border-style:dashed}
+/* one shape per span: in · why · out */
+.step{display:grid;grid-template-columns:34px 1fr;gap:8px;font-size:12px;line-height:1.5;color:var(--mono-dim)}
+.step b{font-family:var(--code);font-size:9px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--mono-quiet);padding-top:2px}
+.why.out b{color:var(--mint);font-family:var(--body)}
+.why.quiet{border-left-color:var(--ink-3);color:var(--mono-quiet);font-size:11.5px}
+.blk.out .blk-h{color:var(--mint)}

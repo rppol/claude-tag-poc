@@ -189,13 +189,14 @@ class Run {
     this.db("INSERT", {
       sql: `INSERT INTO runs (event_id, channel, thread_ts, user_id, text)\nVALUES ('${eventId}', '${this.channel}', '1699.0', '${this.sc.asker}', ?)`,
       head: `run queued · event_id ${eventId}`,
-      because: "the listener has ~3s. One insert, then it returns 200 — everything else happens after the platform has been told the event landed.",
-      then: "UNIQUE(event_id) is the dedupe. A platform retry of this same event becomes a rejected insert, not a second answer.",
+      because: "the listener has ~3 seconds; one insert is all that fits",
+      then: "a platform retry of this event now hits UNIQUE(event_id) and is rejected, not answered twice",
     });
     this.db("BEGIN IMMEDIATE", {
       sql: "SELECT * FROM runs r WHERE (r.status='queued' AND r.next_attempt_at <= datetime('now'))\n   OR (r.status='running' AND r.claimed_at <= datetime('now', ?))\n  AND NOT EXISTS (SELECT 1 FROM runs o WHERE o.channel=r.channel AND o.status='running' …)\nORDER BY r.id LIMIT 1",
       head: "claimed · attempts 1 · lease 300s",
-      because: "the write lock is held across the select and the update, so two workers cannot claim the same row. The NOT EXISTS is per-channel fairness: one alert channel cannot put 200 rows ahead of everyone.",
+      because: "the write lock spans the select and the update, so two workers cannot claim one row",
+      then: "the NOT EXISTS is per-channel fairness — one alert channel cannot put 200 rows ahead of the workspace",
     });
   }
 
@@ -203,12 +204,13 @@ class Run {
     this.db("UPDATE · reserve", {
       sql: "UPDATE runs SET posted_at = datetime('now'), answer = ?\nWHERE id = ? AND attempts = ? AND posted_at IS NULL",
       head: ok ? "right to post reserved · rowcount 1" : "not reserved",
-      because: "fenced on the attempt count. A worker whose lease lapsed holds a stale token, matches no row, and cannot post — this is what makes posting at-most-once when the platform offers no idempotency key.",
+      because: "fenced on the attempt count — a worker whose lease lapsed matches no row",
+      then: "posting is at-most-once. Slack has no idempotency key, so exactly-once is not available at any price.",
     });
     this.db("UPDATE · finish", {
       sql: "UPDATE runs SET status='done', finished_at=datetime('now'), duration_ms=?, tokens_in=?, tokens_out=? WHERE id=?",
       head: `done · ${this.ms}ms · ${this.tokIn}/${this.tokOut} tokens`,
-      because: "telemetry lands on the row, so p95 comes from the queue rather than from a guess.",
+      because: "telemetry on the row, so p95 is measured rather than estimated",
     });
   }
 
@@ -348,7 +350,7 @@ class Run {
     this.emit({
       kind: "route", agent: "librarian", label: "context assembled", ms: 2,
       head: `${this.thread.length} msgs · ${ents.length} entities · ${mems.length} memories · ${dropped.length} flagged`,
-      note: "No model runs here. This was a small-model call whose output nothing downstream ever read; what it was for is mechanical.",
+      note: "No model. Thread + scoped retrieval + entity extraction, then hand off.",
       operands: { thread_messages: this.thread.length, char_budget: 24000,
                   entities: ents, retrieval_query: query, scope: this.scope,
                   flagged_as_content: dropped },

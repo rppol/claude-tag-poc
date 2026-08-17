@@ -71,13 +71,14 @@ function typing(on) {
    exists to replace. */
 
 const kv = (k, v) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`;
+const step = (n, label) => `<div class="step"><b>${n}</b>${label}</div>`;
 const pre = (label, body, cls = "") =>
   `<div class="blk ${cls}"><div class="blk-h">${esc(label)}<span>${body.length} chars</span></div><pre>${esc(body)}</pre></div>`;
 
 function spanBody(s) {
   const out = [];
 
-  if (s.because) out.push(`<p class="why"><b>Why now:</b> ${esc(s.because)}</p>`);
+  if (s.because) out.push(step("why", esc(s.because)));
 
   if (s.kind === "model") {
     out.push(`<div class="meta">${kv("agent", `${s.agent} · ${s.model} model`)}
@@ -88,12 +89,12 @@ function spanBody(s) {
     // rules in every span and scroll to reach the part that differs.
     if (s.system.startsWith(PREAMBLE)) {
       out.push(`<details class="pre-fold"><summary>Shared preamble — ${PREAMBLE.length} chars, identical for every agent</summary><pre>${esc(PREAMBLE)}</pre></details>`);
-      out.push(pre(`SYSTEM PROMPT — the part specific to ${s.label}`, s.system.slice(PREAMBLE.length).trim(), "sys"));
+      out.push(pre(`IN · system prompt, the part specific to ${s.label}`, s.system.slice(PREAMBLE.length).trim(), "sys"));
     } else {
-      out.push(pre("SYSTEM PROMPT — sent verbatim", s.system, "sys"));
+      out.push(pre("IN · system prompt", s.system, "sys"));
     }
-    out.push(pre("USER TURN — assembled from the live context", s.user, "usr"));
-    out.push(pre("RESPONSE", s.output, "out"));
+    out.push(pre("IN · user turn, assembled from the live context", s.user, "usr"));
+    out.push(pre("OUT · response", s.output, "out"));
   }
 
   if (s.kind === "tool") {
@@ -102,21 +103,22 @@ function spanBody(s) {
       ${kv("policy", sp ? `<span class="pol ${sp.policy}">${sp.policy}</span>` : "—")}
       ${kv("stage", `<span class="stage ${s.ok ? "ok" : "no"}">${s.stage}</span>`)}
       ${kv("latency", s.ms + " ms")}</div>`);
-    out.push(pre("REQUEST — arguments as dispatched", j(s.args), "usr"));
-    out.push(s.ok ? pre("RESPONSE", j(s.result), "out")
-                  : `<div class="blk err"><div class="blk-h">REJECTED at the <b>${esc(s.stage)}</b> stage</div><pre>${esc(s.error)}</pre></div>`);
+    out.push(pre("IN · arguments as dispatched", j(s.args), "usr"));
+    out.push(s.ok ? pre("OUT · result", j(s.result), "out")
+                  : `<div class="blk err"><div class="blk-h">OUT · rejected at the <b>${esc(s.stage)}</b> stage</div><pre>${esc(s.error)}</pre></div>`);
     if (s.then) out.push(`<p class="why then"><b>What it changed:</b> ${esc(s.then)}</p>`);
   }
 
   if (s.kind === "vector") {
     out.push(`<div class="meta">${kv("model", s.model)}${kv("dims", s.dims)}
       ${kv("latency", s.ms + " ms")}</div>`);
-    out.push(pre("QUERY TEXT — embedded", s.query, "usr"));
+    out.push(pre("IN · query text, embedded", s.query, "usr"));
     out.push(`<div class="blk sys"><div class="blk-h">QUERY VECTOR <span>first 8 of ${s.dims}</span></div>
       <pre>[${s.preview.join(", ")}, … ]</pre></div>`);
-    out.push(`<div class="blk sys"><div class="blk-h">FILTER PREDICATE — applied <b>inside</b> the query</div>
+    out.push(`<div class="blk sys"><div class="blk-h">IN · filter predicate, applied <b>inside</b> the query</div>
       <pre>${esc(s.predicate)}</pre></div>`);
-    out.push(`<p class="why"><b>${s.inScope} of ${s.corpus}</b> memories were candidates.
+    out.push(`<p class="why out"><b>OUT · ${s.hits.length} hit${s.hits.length === 1 ? "" : "s"}.</b>
+      <b>${s.inScope} of ${s.corpus}</b> memories were candidates.
       <b>${s.excluded}</b> were excluded by the predicate before ranking — they are absent from the
       result set, not filtered out of it.</p>`);
     // A six-column table in a 400px panel gives the memory text one word per
@@ -132,15 +134,17 @@ function spanBody(s) {
   }
 
   if (s.kind === "route") {
-    if (s.rule) out.push(`<div class="blk sys"><div class="blk-h">RULE THAT FIRED</div><pre>${esc(s.rule)}</pre></div>`);
-    if (s.note) out.push(`<p class="why">${esc(s.note)}</p>`);
-    if (s.operands) out.push(pre("OPERANDS — evaluated against this run", j(s.operands), "usr"));
+    if (s.operands) out.push(pre("IN · operands, evaluated against this run", j(s.operands), "usr"));
+    if (s.rule) out.push(`<div class="blk out"><div class="blk-h">OUT · rule that fired</div><pre>${esc(s.rule)}</pre></div>`);
+    if (s.head && !s.rule) out.push(step("out", esc(s.head)));
+    if (s.note) out.push(`<p class="why quiet">${esc(s.note)}</p>`);
     if (s.path) out.push(`<p class="why"><b>Path:</b> ${s.path.map(n => `<code>${esc(n)}</code>`).join(" → ")}</p>`);
   }
 
   if (s.kind === "verify") {
-    out.push(`<div class="meta">${kv("tokens checked", s.checked)}${kv("evidence corpus", s.corpus + " tokens")}
-      ${kv("verdict", s.ok ? '<b class="good">pass</b>' : '<b class="bad">reject</b>')}</div>`);
+    out.push(`<div class="meta">${kv("in", `draft · ${s.checked} claim tokens`)}
+      ${kv("against", s.corpus + " evidence tokens")}
+      ${kv("out", s.ok ? '<b class="good">pass</b>' : '<b class="bad">reject</b>')}</div>`);
     out.push(verifyTable(s.rows, s.unhedged));
   }
 
@@ -154,7 +158,8 @@ function spanBody(s) {
 
   if (s.kind === "db") {
     out.push(`<div class="meta">${kv("table", "<code>runs</code>")}${kv("latency", s.ms + " ms")}</div>`);
-    if (s.sql) out.push(pre("SQL", s.sql, "usr"));
+    if (s.sql) out.push(pre("IN · SQL", s.sql, "usr"));
+    if (s.head) out.push(step("out", esc(s.head)));
     if (s.then) out.push(`<p class="why then"><b>Why it is shaped that way:</b> ${esc(s.then)}</p>`);
   }
 
@@ -183,10 +188,8 @@ function spanBody(s) {
     if (s.artifact) out.push(pre("ARTIFACT", j(s.artifact), "out"));
   }
 
-  out.push(`<p class="prov ${s.fixture ? "fix" : s.partial ? "part" : "comp"}">${
-    s.fixture ? `<b>fixture:</b> ${esc(s.fixture)}. Everything else in this span was computed when you pressed play.`
-    : s.partial ? `<b>mixed:</b> ${esc(s.partial)}.`
-    : `<b>computed:</b> this span was produced by code running in your browser just now. Change the input and it changes.`}</p>`);
+  if (s.fixture) out.push(`<p class="prov fix"><b>fixture:</b> ${esc(s.fixture)}</p>`);
+  else if (s.partial) out.push(`<p class="prov part"><b>mixed:</b> ${esc(s.partial)}</p>`);
   return out.join("");
 }
 
@@ -202,11 +205,25 @@ function verifyTable(rows, unhedged) {
   return t + h;
 }
 
-const KIND_LABEL = { model: "model", tool: "tool", vector: "vector", route: "route", verify: "verify", gate: "gate", a2a: "a2a", db: "db", memwrite: "write" };
+const KIND_LABEL = { model: "prompt", tool: "mcp", vector: "vector", route: "logic",
+                     verify: "logic", gate: "human", a2a: "a2a", db: "queue", memwrite: "vector" };
+
+/* The six things a run can touch. The strip answers "did this scenario use
+   A2A?" without opening anything — which is the question the trace could not
+   answer, because a span reading "TOOL" never said which protocol. */
+const CAPS = [
+  { id: "prompt", label: "Prompts", kinds: ["model"],            hint: "a model call, with the exact strings it was sent" },
+  { id: "queue",  label: "Queue",   kinds: ["db"],               hint: "the runs table — insert, claim, checkpoint, fenced post" },
+  { id: "vector", label: "Vectors", kinds: ["vector", "memwrite"], hint: "scoped retrieval and memory writes" },
+  { id: "mcp",    label: "MCP",     kinds: ["tool"],             hint: "a typed call to a tool server inside our trust boundary" },
+  { id: "a2a",    label: "A2A",     kinds: ["a2a"],              hint: "a task handed to an agent with its own lifecycle" },
+  { id: "human",  label: "Human",   kinds: ["gate"],             hint: "the graph pauses for a person" },
+];
 
 function renderSpan(s, i) {
   const el = document.createElement("details");
   el.className = "span k-" + s.kind + (s.ok === false ? " failed" : "") + (s.async ? " async" : "");
+  el.dataset.kind = s.kind;
   const badge = (s.fixture ? `<i class="pv fix">fixture</i>`
     : s.partial ? `<i class="pv part">mixed</i>` : `<i class="pv comp">computed</i>`)
     + (s.async ? `<i class="pv async">after the reply</i>` : "");
@@ -252,11 +269,35 @@ const CAP_ROWS = [
   ["human",    m => m.gate ? "approval gate" + (m.debate ? ", after a debate" : "") : ""],
 ];
 
+let capCounts = {};
 function renderUses(flow) {
   const m = manifest(flow);
+  const spans = [];
+  const rt = new Run(flow, x => spans.push(x));
+  try { flow.run(rt); } catch { /* surfaced in the trace */ }
+  capCounts = Object.fromEntries(CAPS.map(c => [c.id, spans.filter(s => c.kinds.includes(s.kind)).length]));
+
+  $("caps").innerHTML = CAPS.map(c => {
+    const n = capCounts[c.id];
+    return `<button class="cap ${n ? "on" : "off"}" data-cap="${c.id}" ${n ? "" : "disabled"}
+      title="${esc(c.hint)}${n ? "" : " — not used by this scenario"}">
+      <b>${c.label}</b><i>${n || "—"}</i></button>`;
+  }).join("") + `<button class="cap all on" data-cap="all"><b>All</b><i>${spans.length}</i></button>`;
+
   $("uses").innerHTML = `<div class="uses-h">${esc(flow.name)} <em>${esc(m.tier || "")}</em></div>` +
     CAP_ROWS.map(([k, f]) => { const v = f(m); return v ? `<div class="use-row"><dt>${k}</dt><dd>${v}</dd></div>` : ""; }).join("") +
     `<p class="use-note">${esc(flow.proves)}</p>`;
+}
+
+/* Clicking a capability filters the trace to it. "Am I unable to navigate to
+   it?" was a fair question — there was no way to get from a capability to the
+   spans that used it. */
+function filterTrace(cap) {
+  const kinds = cap === "all" ? null : CAPS.find(c => c.id === cap).kinds;
+  document.querySelectorAll("#trace .span").forEach(el => {
+    el.hidden = kinds ? !kinds.includes(el.dataset.kind) : false;
+  });
+  document.querySelectorAll(".cap").forEach(b => b.classList.toggle("sel", b.dataset.cap === cap));
 }
 
 /* ─────────────── run ─────────────── */
@@ -538,6 +579,10 @@ function boot() {
   });
 
   $("sbText").addEventListener("input", sandboxCheck);
+  $("caps").addEventListener("click", e => {
+    const b = e.target.closest(".cap");
+    if (b && !b.disabled) filterTrace(b.dataset.cap);
+  });
 
   const tabs = [["tab-arch", "view-arch"], ["tab-sim", "view-sim"]];
   function select(i, focus) {
