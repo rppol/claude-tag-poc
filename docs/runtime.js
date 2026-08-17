@@ -145,8 +145,9 @@ function summarise(name, d) {
   if (d.reacted) return `reacted :${d.reacted}:`;
   if (d.messages) return `${d.messages.length} messages`;
   if (d.labels) return `#${d.n} ${d.title}`;
+  if (d.path && d.after !== undefined)
+    return `${d.path} · ${String(d.before).split("\n")[0]} → ${String(d.after).split("\n")[0]}`;
   if (d.branch) return `branch ${d.branch} from ${d.from}`;
-  if (d.after !== undefined && d.path) return `${d.path} · ${JSON.stringify(d.before).slice(0, 22)} → ${JSON.stringify(d.after).slice(0, 22)}`;
   if (d.start && d.attendees) return `${d.start}–${d.end} · ${d.attendees.length} free`;
   if (d.event_id) return `${d.event_id} · ${d.start} · ${d.invited} invited`;
   if (d.sent_to) return `${d.sent_to} recipients · ${d.chars} chars`;
