@@ -42,7 +42,10 @@ const TIERS = [
    verifier covers. The verifier checks tokens, so it is blind to causation →
    CAUSAL routes to debate. The verifier checks what is SAID, never what is
    DONE, so it is blind to writes → a non-auto tool routes to debate. */
-const CAUSAL = /\b(why|root cause|caused|because|correlat|same (issue|cause|thing|root)|related to|blame|due to)\b/i;
+// Bare `cause` was missing: "did the cache deploy cause this?" routed T1,
+// which is precisely the question this tier exists for. Found by listing what
+// the predicate does with real phrasings rather than by reading it.
+const CAUSAL = /\b(why|root cause|causes?|caused|causing|because|correlat|same (issue|cause|thing|root)|related to|to blame|due to|lead(s|ing)? to|led to|responsible)\b/i;
 
 /* An `incidentActive` gate used to sit second in this chain, justified as
    "stakes are pinned by channel state". It was removed, for a reason worth
