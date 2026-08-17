@@ -144,7 +144,10 @@ enforcement, and a regex that believed otherwise would be worse than no regex.`,
     output: `{ findings: [{tool, args, result_id, says}], unresolved: [] }`,
     tools: ["grafana.list_metrics", "grafana.query_datasource",
             "pagerduty.get_oncall", "pagerduty.page_oncall",
-            "github.list_deploys", "github.get_config", "github.get_diff", "github.create_pull_request"],
+            "github.list_deploys", "github.get_config", "github.get_diff", "github.get_issue",
+            "github.create_branch", "github.commit_file", "github.create_pull_request",
+            "calendar.find_slot", "calendar.create_event", "email.send_summary",
+            "scheduler.schedule_wakeup", "scheduler.list_pending"],
     system: `${PREAMBLE}
 
 YOUR ROLE: Agent. You answer by using tools, one call at a time.
@@ -378,7 +381,7 @@ EXISTING MEMORIES ON THESE SUBJECTS: {memories}`,
     owns: "Whether to speak unasked — and far more often, whether not to.",
     inputs: "channel message stream",
     output: `{ act: "post"|"offer"|"stay_silent", why: string }`,
-    tools: ["grafana.list_metrics", "grafana.query_datasource", "slack.add_reaction"],
+    tools: ["grafana.list_metrics", "grafana.query_datasource"],
     system: `${PREAMBLE}
 
 YOUR ROLE: Sentinel. You watch a channel you were not tagged in, on the cheapest model available, on every message. You are a filter, not an agent — the expensive graph runs only if you say so.
@@ -396,6 +399,7 @@ One bad interruption costs more than ten missed opportunities. A channel that mu
 MESSAGE: {message}
 AGE: {age} · REPLIES: {replies}
 BUDGET: {used} of {cap} this week`,
+    noFlow: "Ambient is not one of the five use cases this build demonstrates, so nothing exercises it. Kept because the design decision — three actions, not two, with `offer` as the default — is the part worth keeping; delete the agent if ambient is dropped for good.",
     fails: "Precision collapses, the channel mutes it, and the feature is dead there permanently. There is no second launch.",
   },
 

@@ -90,8 +90,9 @@
       <div class="callout">
         <b>The filter belongs in the query predicate, never after retrieval.</b>
         <p>Post-filtering leaks through result counts, ranking and latency, and sits one refactor from
-        deletion by someone who reads it as a redundant guard. Run <b>Scope boundary</b> in the
-        simulator: the excluded count is shown, and the hits are absent from the result set rather
+        deletion by someone who reads it as a redundant guard. Run <b>Remember what was learned</b> in
+        the simulator: it issues the identical query twice, once with this channel's binding and
+        once with another's, and the excluded rows are absent from the second result set rather
         than removed from it.</p>
       </div>
     </section>
@@ -176,6 +177,11 @@
 
   <aside class="runtime">
     <div class="rt-head"><b>Run</b><span id="rtState">idle</span></div>
+
+    <section class="rt-sec" id="usesSec">
+      <div id="uses" class="uses"><p class="use-note">Pick a scenario. This panel lists what it
+      touches — prompts, the queue, vectors, MCP tools, A2A — derived by running it, never declared.</p></div>
+    </section>
 
     <section class="rt-sec trace-sec">
       <div class="tstats" id="tstats"></div>

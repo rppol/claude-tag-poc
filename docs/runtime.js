@@ -144,6 +144,14 @@ function summarise(name, d) {
   if (d.files) return `${d.files.length} file(s) changed`;
   if (d.reacted) return `reacted :${d.reacted}:`;
   if (d.messages) return `${d.messages.length} messages`;
+  if (d.labels) return `#${d.n} ${d.title}`;
+  if (d.branch) return `branch ${d.branch} from ${d.from}`;
+  if (d.after !== undefined && d.path) return `${d.path} · ${JSON.stringify(d.before).slice(0, 22)} → ${JSON.stringify(d.after).slice(0, 22)}`;
+  if (d.start && d.attendees) return `${d.start}–${d.end} · ${d.attendees.length} free`;
+  if (d.event_id) return `${d.event_id} · ${d.start} · ${d.invited} invited`;
+  if (d.sent_to) return `${d.sent_to} recipients · ${d.chars} chars`;
+  if (d.reason) return `${d.id} at ${d.at} · ${d.state}`;
+  if (d.pending) return `${d.pending.length} pending`;
   return Object.keys(d).slice(0, 3).join(", ");
 }
 
@@ -164,6 +172,84 @@ class Run {
     this.approved = new Set(sc.approved || []);
     this.tokIn = 0; this.tokOut = 0; this.ms = 0;
     this.calls = 0;
+    this.writes = 0;
+    rewindWorld();
+  }
+
+  /* A human said yes. Until this runs, a non-auto tool refuses at the policy
+     stage — which is what makes the refusal in the trace real rather than
+     narrated. Flows must not pre-approve. */
+  approve(name) { this.approved.add(name); return name; }
+
+  /* The two ends of every run against the `runs` table. This is the part that
+     is actually implemented and tested in the repo, and the simulator used to
+     render none of it. */
+  accept(eventId) {
+    this.db("INSERT", {
+      sql: `INSERT INTO runs (event_id, channel, thread_ts, user_id, text)\nVALUES ('${eventId}', '${this.channel}', '1699.0', '${this.sc.asker}', ?)`,
+      head: `run queued · event_id ${eventId}`,
+      because: "the listener has ~3s. One insert, then it returns 200 — everything else happens after the platform has been told the event landed.",
+      then: "UNIQUE(event_id) is the dedupe. A platform retry of this same event becomes a rejected insert, not a second answer.",
+    });
+    this.db("BEGIN IMMEDIATE", {
+      sql: "SELECT * FROM runs r WHERE (r.status='queued' AND r.next_attempt_at <= datetime('now'))\n   OR (r.status='running' AND r.claimed_at <= datetime('now', ?))\n  AND NOT EXISTS (SELECT 1 FROM runs o WHERE o.channel=r.channel AND o.status='running' …)\nORDER BY r.id LIMIT 1",
+      head: "claimed · attempts 1 · lease 300s",
+      because: "the write lock is held across the select and the update, so two workers cannot claim the same row. The NOT EXISTS is per-channel fairness: one alert channel cannot put 200 rows ahead of everyone.",
+    });
+  }
+
+  settle(ok = true) {
+    this.db("UPDATE · reserve", {
+      sql: "UPDATE runs SET posted_at = datetime('now'), answer = ?\nWHERE id = ? AND attempts = ? AND posted_at IS NULL",
+      head: ok ? "right to post reserved · rowcount 1" : "not reserved",
+      because: "fenced on the attempt count. A worker whose lease lapsed holds a stale token, matches no row, and cannot post — this is what makes posting at-most-once when the platform offers no idempotency key.",
+    });
+    this.db("UPDATE · finish", {
+      sql: "UPDATE runs SET status='done', finished_at=datetime('now'), duration_ms=?, tokens_in=?, tokens_out=? WHERE id=?",
+      head: `done · ${this.ms}ms · ${this.tokIn}/${this.tokOut} tokens`,
+      because: "telemetry lands on the row, so p95 comes from the queue rather than from a guess.",
+    });
+  }
+
+  /* The queue, made visible. This is the one part of the system that is
+     actually built and tested, and the simulator never showed it — the page
+     argued for a durable queue while rendering nothing that touched one. */
+  db(label, opts = {}) {
+    const ms = opts.ms ?? 2;
+    this.ms += ms;
+    this.emit({
+      kind: "db", agent: "queue", label, ms,
+      head: opts.head, sql: opts.sql, row: opts.row,
+      because: opts.because, then: opts.then, fixture: null,
+    });
+  }
+
+  /* A memory write, with everything the Scribe's prompt requires: scope from
+     the binding, provenance, and who confirmed it. It really lands in the
+     store, so a later retrieval in the same run really finds it. */
+  memWrite(records, opts = {}) {
+    const rows = records.map((r, i) => ({
+      id: `m_${String(WORLD.memories.length + 1 + i).padStart(2, "0")}`,
+      scope_id: this.scope, age_days: 0, uses: 0, ...r,
+    }));
+    // A contradiction on the same (subject, predicate) is flagged, never merged:
+    // near-identical embeddings with opposite meanings is exactly the case a
+    // similarity threshold gets wrong.
+    const clashes = rows.flatMap(r => WORLD.memories
+      .filter(m => m.scope_id === r.scope_id && m.subject === r.subject && m.predicate && m.predicate === r.predicate)
+      .map(m => ({ existing: m.id, incoming: r.id, subject: r.subject, predicate: r.predicate })));
+    WORLD.memories.push(...rows);
+    this.writes += rows.length;
+    const ms = 30 + rows.length * 12;
+    this.ms += ms;
+    this.emit({
+      kind: "memwrite", agent: "scribe", label: "memory.upsert", ms,
+      head: `${rows.length} written to ${this.scope}` + (clashes.length ? ` · ${clashes.length} contradiction flagged` : ""),
+      rows, clashes, model: "text-embedding-3-small", dims: 1536,
+      preview: vecPreview(rows[0].text),
+      because: opts.because, fixture: null,
+    });
+    return rows;
   }
 
   /* Assemble the exact strings a model would receive, count them, and emit
@@ -193,7 +279,8 @@ class Run {
 
   /* A real dispatch: allowlist → schema → clamps → policy → handler. */
   tool(agent, name, args, opts = {}) {
-    const rec = callTool(name, args, { agent, scope: this.scope, thread: this.thread, approved: this.approved });
+    const rec = callTool(name, args, { agent, scope: this.scope, channel: this.channel,
+      thread_ts: "1699.0", thread: this.thread, approved: this.approved });
     this.calls++;
     const ms = opts.ms ?? (rec.ok ? 90 + Math.round(JSON.stringify(rec.data || {}).length * 0.12) : 20);
     this.ms += ms;
@@ -287,18 +374,20 @@ class Run {
      the copy this page documents never executed — deleting it outright left
      every check green. One predicate, one path, one thing to get right. */
   recall(query, opts = {}) {
+    const scope = opts.asScope || this.scope;
     const rec = callTool("memory.mem_search", { query, k: opts.k || 4 },
-      { agent: "librarian", scope: this.scope, thread: this.thread, approved: this.approved });
+      { agent: "librarian", scope, thread: this.thread, approved: this.approved });
     const d = rec.data || { hits: [], corpus: 0, inScope: 0, excluded: 0 };
     const ms = 40 + d.inScope * 3;
     this.ms += ms;
     for (const h of d.hits) this.evidence.push(h.text);
     this.emit({
-      kind: "vector", agent: "librarian", label: "memory.mem_search", ms,
+      kind: "vector", agent: "librarian", ms,
+      label: opts.asScope ? `memory.mem_search · as ${opts.asScope}` : "memory.mem_search",
       query, model: "text-embedding-3-small", dims: 1536, preview: vecPreview(query),
       head: `${d.hits.length} hit${d.hits.length === 1 ? "" : "s"} of ${d.inScope} in scope` +
             (d.hits.length ? ` · top ${d.hits[0].score}` : " · nothing matched"),
-      predicate: `scope_id = "${this.scope}"`,
+      predicate: `scope_id = "${scope}"`,
       corpus: d.corpus, inScope: d.inScope, excluded: d.excluded,
       spec: rec.spec, args: rec.args,
       hits: d.hits.map(h => ({ id: h.id, score: h.score, matched: h.matched, kind: h.kind,
@@ -372,7 +461,7 @@ class Run {
       // politeness the critic can decline.
       const kept = [], dropped = [];
       for (const o of [...mech, ...objs])
-        (o.kind === "contradicted" && !o.cites ? dropped : kept).push(o);
+        (!o.cites ? dropped : kept).push(o);
 
       const high = kept.filter(o => o.severity === "high");
       out.rounds.push({ proposal: prop, attack, kept, dropped, verdict });

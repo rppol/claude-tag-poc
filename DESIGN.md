@@ -503,3 +503,44 @@ ack → queue → librarian (code) → agent ⇄ tools → writer → verifier (
                               planner ⇄ critic
                                                               post → scribe (async)
 ```
+
+
+---
+
+## 12 · The five things it does
+
+The scenario set was replaced with the five use cases that were actually asked for. Each is an
+input the runtime executes; the panel beside the trace lists what it touched, **derived from the
+spans rather than declared on the flow** — a declared manifest is a second source of truth, which
+is the drift bug this repo keeps re-learning.
+
+| | uses |
+|---|---|
+| **Investigate an incident** | queue · 1 scoped retrieval · 6 MCP reads · `page_oncall` refused as `two_person` |
+| **Book a review, email the writeup** | queue + checkpoint · `calendar.find_slot` derived from free/busy · two `always_ask` writes, each refused then approved |
+| **Fix an issue in the repo** | `get_issue` → `get_diff` → `create_branch` (auto, reversible) → `commit_file` (asks) → PR, with a debate before the human sees it |
+| **Wake itself up later** | a durable row with `next_attempt_at` in the future, plus an A2A task that pauses to ask us a question |
+| **Remember what was learned** | 3 memory writes with provenance, a flagged contradiction, and the same query run under two channel bindings |
+
+Three surfaces were added to support them.
+
+**The queue is finally visible.** It is the one part of this system that is genuinely built and
+tested, and the simulator rendered none of it — the page argued for a durable queue while showing
+nothing that touched one. Every run now opens with the `INSERT` and the `BEGIN IMMEDIATE` claim,
+and closes with the fenced `reserve_post` and the telemetry update, each with its real SQL.
+
+**Long-horizon work is a row, not a held thread.** The wake-up flow finishes its first run, writes
+a second row with `next_attempt_at` an hour out and a carry payload, and lets the worker exit. An
+hour later the same claim predicate that handles a retry picks it up — there is no second
+mechanism, because `next_attempt_at` already meant "not before this time".
+
+**Approval is a sequence, not a claim.** Flows used to pre-approve the tools they were about to
+call, so the "refused, then approved" beat never actually refused — the trace narrated a gate that
+had not run. Approval is now an explicit step between the refusal and the retry, and a check
+asserts both halves appear.
+
+Two smaller defects surfaced while building these. The debate's objection filter dropped only
+uncited `contradicted` objections, while the prompt and the protocol both said *any* uncited
+objection is discarded — the code was the odd one out. And the schema validator rejected every key
+of a free-form object, which made the scheduler's `carry` payload unusable; a schema with no
+declared `properties` is now understood as deliberately open.

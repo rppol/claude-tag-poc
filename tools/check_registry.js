@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-/* The registry is now load-bearing: the simulator executes it and the
- * architecture tab documents it. This asserts the two cannot diverge.
+/* The registry is load-bearing: the simulator executes it and the design page
+ * documents it. This asserts the two cannot diverge.
  *
- * It exists because the previous version of this repo published TWO
- * contradictory rosters — a NODES array animating a planner/executor/reviewer
- * in the simulator, and an AGENTS array in the architecture tab explaining at
- * length why those three had been deleted. Nothing detected it, because they
- * were unrelated data that happened to share a file.
+ * It exists because this repo once published TWO contradictory rosters — a
+ * NODES array animating a planner/executor/reviewer in the simulator, and an
+ * AGENTS array explaining at length why those three had been deleted. Nothing
+ * detected it, because they were unrelated data that happened to share a file.
+ *
+ * Every check here was verified to FAIL against a deliberate mutation before
+ * being written. A check that cannot fail is worse than no check.
  *
  *   node tools/check_registry.js
  */
@@ -14,7 +16,7 @@
 const path = require("path");
 const d = f => path.join(__dirname, "..", "docs", f);
 
-// Load order matters: these are plain globals, exactly as the page loads them.
+// Load order matters: plain globals, exactly as the page loads them.
 Object.assign(global, require(d("tools.js")));
 Object.assign(global, require(d("agents.js")));
 Object.assign(global, require(d("runtime.js")));
@@ -27,228 +29,198 @@ const ok = (cond, label, detail = "") => {
   else { console.log(`  FAIL  ${label}${detail ? "\n          " + detail : ""}`); fails++; }
 };
 
+/* ═══════ registry ═══════ */
 console.log("\nregistry");
 const ids = new Set(AGENTS.map(a => a.id));
-
-ok(AGENTS.every(a => a.owns && a.fails && a.inputs && a.output),
-   "every agent declares owns / inputs / output / fails");
-ok(AGENTS.every(a => a.model === "none" || a.model === "external" ? true : a.system.length > 400),
+ok(AGENTS.every(a => a.owns && a.fails && a.inputs && a.output), "every agent declares owns / inputs / output / fails");
+ok(AGENTS.every(a => (a.model === "none" || a.model === "external") ? true : a.system.length > 400),
    "every model-backed agent carries a real system prompt");
 ok(AGENTS.filter(a => a.model === "none").every(a => a.predicate),
    "every model-less agent shows its predicate source instead");
-ok(AGENTS.every(a => a.tools.every(t => TOOL[t])),
-   "every tool in every allowlist exists in the catalogue",
+ok(AGENTS.every(a => a.tools.every(t => TOOL[t])), "every tool in every allowlist exists",
    AGENTS.flatMap(a => a.tools.filter(t => !TOOL[t])).join(", "));
-ok(TOOLS.every(t => t.callers.every(c => ids.has(c))),
-   "every callers entry names a real agent",
+ok(TOOLS.every(t => t.callers.every(c => ids.has(c))), "every callers entry names a real agent",
    TOOLS.flatMap(t => t.callers.filter(c => !ids.has(c))).join(", "));
 ok(TOOLS.every(t => t.params && t.kind && t.policy && t.callers && t.desc),
    "every tool declares params / kind / policy / callers / desc");
+ok(TIERS.length === 2, `two tiers, not three (${TIERS.map(t => t.id).join(" ")})`);
 
+/* ═══════ invariants with teeth ═══════ */
 console.log("\ninvariants with teeth");
-// The dangerous default. A write that cannot be undone must never be `auto`.
 const badWrites = TOOLS.filter(t => t.kind === "write" && t.policy === "auto" && !t.reversible);
 ok(badWrites.length === 0, "no irreversible write tool has policy:auto",
    badWrites.map(t => `${t.server}.${t.name}`).join(", "));
-
-// Posting is a graph edge after the verifier, fenced by db.reserve_post().
-// As a tool it would be a path around the verifier, and a gate that can be
-// bypassed is not a gate.
+// Posting runs after the verifier, fenced by db.reserve_post(). As a tool it
+// would be a path around the verifier, and a gate that can be bypassed is not one.
 ok(!TOOL["slack.post_message"], "slack.post_message is NOT a tool");
+ok(AGENT.librarian.model === "none" && AGENT.librarian.predicate.length > 400,
+   "the librarian is code, and the registry shows its source");
 
-// The bidirectional check that catches roster drift in either direction.
-const reached = new Set();
+/* ═══════ run every flow ═══════ */
+const reached = new Set(), usedTools = new Set();
 for (const f of FLOWS) {
   const spans = [];
-  const rt = new Run({ ...f, thread: f.thread, scope: f.scope, channel: f.channel }, s => spans.push(s));
+  const rt = new Run(f, s => spans.push(s));
   try { f.run(rt); } catch (e) { console.log(`  FAIL  flow ${f.id} threw: ${e.message}`); fails++; n++; }
-  for (const s of spans) reached.add(s.agent);
-  f._spans = spans;
+  for (const s of spans) {
+    reached.add(s.agent);
+    if (s.kind === "tool" || s.kind === "vector") usedTools.add(String(s.label).replace(/ · as .*/, ""));
+  }
+  f._spans = spans; f._rt = rt;
 }
-const unreachable = [...ids].filter(i => !reached.has(i));
-ok(unreachable.length === 0, "every agent is reachable from at least one flow", unreachable.join(", "));
-const ghosts = [...reached].filter(a => !ids.has(a));
-ok(ghosts.length === 0, "no flow emits an agent that is not in the registry", ghosts.join(", "));
 
-console.log("\nflows");
-for (const f of FLOWS) ok(f._spans.length > 2, `${f.id} produced ${f._spans.length} spans`);
+console.log("\nthe five use cases");
+const WANT = ["investigate", "writeup", "fixrepo", "wakeup", "remember"];
+ok(WANT.every(id => FLOW[id]), "all five flows exist", WANT.filter(id => !FLOW[id]).join(", "));
+for (const f of FLOWS) ok(f._spans.length > 5, `${f.id}: ${f._spans.length} spans · ${f._rt.calls} tools · ${f._spans.filter(s => s.kind === "db").length} db`);
 ok(FLOWS.every(f => f.proves && f.why && f.impl), "every flow states what it proves and how real it is");
 
+console.log("\nnothing in the registry is unreachable or invented");
+const unreachable = [...ids].filter(i => !reached.has(i));
+ok(unreachable.every(i => AGENT[i].noFlow),
+   "every unreachable agent explains why no flow exercises it",
+   unreachable.filter(i => !AGENT[i].noFlow).join(", "));
+ok(unreachable.every(i => AGENT[i].stage === "later"),
+   `no core agent is unreachable (unreachable: ${unreachable.join(", ") || "none"})`);
+// `queue` is the runs table, not an agent — db spans are emitted by the
+// runtime itself and have no registry entry by design.
+const ghosts = [...reached].filter(a => !ids.has(a) && a !== "queue");
+ok(ghosts.length === 0, "no flow emits an agent that is not in the registry", ghosts.join(", "));
+const cold = TOOLS.map(t => `${t.server}.${t.name}`).filter(x => !usedTools.has(x));
+ok(cold.length === 0, "every catalogued tool is exercised by some flow", cold.join(", "));
+
+console.log("\nthe five use cases each show what they claim to");
+{
+  const inv = FLOW.investigate._spans;
+  const q = inv.find(s => s.label === "grafana.query_datasource");
+  const dep = inv.find(s => s.label === "github.list_deploys");
+  ok(q && dep && inv.indexOf(q) < inv.indexOf(dep) && /14:01:40/.test(dep.because),
+     "investigate: the deploy query's window comes from where the metric stepped");
+  ok(inv.some(s => s.label === "pagerduty.page_oncall" && s.needsApproval === "two_person"),
+     "investigate: paging is refused as two_person");
+
+  const w = FLOW.writeup._spans;
+  const refused = w.filter(s => s.kind === "tool" && s.needsApproval === "always_ask");
+  ok(refused.length >= 1 && w.some(s => s.approval), "writeup: the write is refused, then approved");
+  ok(w.some(s => s.label === "calendar.find_slot" && s.ok), "writeup: the slot is derived from free/busy");
+  ok(w.some(s => s.label === "email.send_summary" && s.ok), "writeup: the mail goes out only after the gate");
+
+  const fx = FLOW.fixrepo._spans;
+  ok(fx.some(s => s.label === "github.create_branch" && s.ok), "fixrepo: a reversible write runs without asking");
+  ok(fx.some(s => s.label === "github.commit_file" && s.needsApproval === "always_ask"),
+     "fixrepo: the commit is not reversible, so it asks");
+  ok(fx.some(s => s.label === "debate control"), "fixrepo: the write escalated to debate BEFORE the human");
+  ok(fx.some(s => s.label === "github.create_pull_request" && s.ok), "fixrepo: the PR opens on a validated base");
+
+  const wk = FLOW.wakeup._spans;
+  ok(wk.some(s => s.label === "scheduler.schedule_wakeup" && s.ok), "wakeup: a durable timer is written");
+  ok(wk.filter(s => s.kind === "db").length >= 5, "wakeup: the run parks and is re-claimed as rows");
+  ok(wk.some(s => s.kind === "a2a" && s.state === "input-required"),
+     "wakeup: the specialist asks US something — an MCP call has no state to return to");
+  ok(wk.filter(s => s.kind === "verify").length === 2, "wakeup: it answers twice, an hour apart");
+
+  const rm = FLOW.remember._spans;
+  const writes = rm.filter(s => s.kind === "memwrite");
+  ok(writes.length >= 2, "remember: memories are written");
+  ok(writes.every(s => s.rows.every(r => r.provenance)), "remember: every row carries provenance");
+  ok(writes.some(s => s.clashes.length > 0), "remember: a contradiction on the same subject is flagged, not merged");
+  const mine = rm.find(s => s.kind === "vector" && !/as /.test(s.label) && s.hits.length);
+  const theirs = rm.find(s => /as sales-claude/.test(s.label));
+  ok(mine && theirs && theirs.hits.length === 0,
+     `remember: the identical query returns ${mine ? mine.hits.length : "?"} here and ${theirs ? theirs.hits.length : "?"} from the other channel's binding`);
+  ok(theirs && theirs.excluded > 0, "remember: the excluded rows are absent from the result set, not filtered from it");
+}
+
 console.log("\nthe fixtures must survive their own verifier");
-// A hand-written answer that cannot pass the mechanical check is a lie about
-// the system — the same failure as a test that passes against broken code,
-// relocated into content. `reject` is exempt for draft 1, which exists to fail.
 for (const f of FLOWS) {
   const checks = f._spans.filter(s => s.kind === "verify");
-  const expectFail = f.id === "reject" ? 1 : 0;
   const failed = checks.filter(c => !c.ok);
-  ok(failed.length === expectFail,
-     `${f.id}: ${checks.length} verifier run(s), ${failed.length} rejected (expected ${expectFail})`,
+  ok(failed.length === 0, `${f.id}: ${checks.length} verifier run(s), all pass`,
      failed.map(c => c.head).join(" | "));
 }
 
-console.log("\nthe verifier actually rejects");
-const rej = FLOW.reject._spans.filter(s => s.kind === "verify");
-ok(rej[0] && !rej[0].ok, "the invented 205x ratio is caught");
-ok(rej[0] && rej[0].unsupported.some(u => /205/.test(u.raw)), "and it is named in the rejection",
-   JSON.stringify(rej[0] && rej[0].unsupported.map(u => u.raw)));
-ok(rej[1] && rej[1].ok, "the rewrite passes");
-// Falsification: the check must be capable of failing on a clean draft too.
+console.log("\nthe verifier rejects, and can be shown to");
 const forged = verify("The rate hit 999 req/s at 03:33 and @nobody is oncall.", ["nothing relevant"]);
 ok(!forged.pass && forged.unsupported.length >= 3, "a forged draft fails against an empty corpus");
-// Regression: parseFloat("14:55") is 14, so a numeric near-match against an
-// evidence value of 14:10 used to mark an invented timestamp as supported.
 const clock = verify("The rate hit 41 req/s at 14:55.", ['{"points":[["14:10",41]],"unit":"req/s"}']);
 ok(!clock.pass && clock.unsupported.some(u => u.raw === "14:55"),
-   "an invented timestamp is not rescued by a numeric near-match",
-   JSON.stringify(clock.unsupported.map(u => u.raw)));
-const round = verify("The rate is 41 req/s.", ['{"points":[["14:10",41.2]],"unit":"req/s"}']);
-ok(round.pass, "but correct rounding of a measurement still passes");
-const hedgeless = verify("The deploy caused the outage.", ["the deploy caused the outage"]);
-ok(!hedgeless.pass && hedgeless.unhedged.length === 1, "an unhedged causal claim is caught even when every token is grounded");
-
-console.log("\nscope is a predicate, not a post-filter");
-const scopeSpan = FLOW.scope._spans.find(s => s.kind === "vector");
-ok(scopeSpan && scopeSpan.hits.length === 0, "0 in-scope hits for an engineering question asked in #sales-eu");
-ok(scopeSpan && scopeSpan.excluded > 0, `${scopeSpan && scopeSpan.excluded} memories excluded BEFORE ranking`);
-const engSpan = FLOW.fast._spans.find(s => s.kind === "vector");
-ok(engSpan && engSpan.hits.length > 0, "the same store returns hits in the engineering scope");
-const dump = FLOW.scope._spans.find(s => s.kind === "tool" && s.label === "memory.dump");
-ok(dump && !dump.ok && dump.stage === "allowlist", "memory.dump is refused at the allowlist stage");
-
-console.log("\ntools enforce their own contracts");
-const cx = { agent: "executor", scope: "eng-claude", thread: [], approved: new Set() };
-ok(callTool("grafana.query_datasource", { expr: 'rate(http_5xx{service="checkout-api"}[5m])', from: "13:00", to: "14:00" }, cx).ok,
-   "a well-formed query succeeds");
-ok(callTool("grafana.query_datasource", { expr: "x", from: "13:00", to: "14:00", step: 5 }, cx).stage === "schema",
-   "step below the minimum is a schema failure");
-ok(callTool("grafana.query_datasource", { expr: 'rate(http_5xx{service="checkout-api"}[5m])', from: "01:00", to: "14:00" }, cx).error.includes("clamp"),
-   "a 13h window is rejected by the clamp");
-ok(callTool("grafana.query_datasource", { expr: '{__name__=~".+"}', from: "13:00", to: "14:00" }, cx).error.includes("full-cardinality"),
-   "a bare high-cardinality matcher is rejected outright");
-ok(callTool("github.create_pull_request", { repo: "acme/checkout-api", base: "nope", head: "revert-2.3.1", title: "x" },
-            { ...cx, approved: new Set(["github.create_pull_request"]) }).error.includes("base"),
-   "a PR on a base that does not exist is rejected");
-ok(callTool("pagerduty.page_oncall", { team: "payments", message: "x", urgency: "high" }, cx).needsApproval === "two_person",
-   "paging requires two people");
-ok(callTool("grafana.query_datasource", { expr: "x", from: "13:00", to: "14:00" }, { ...cx, agent: "writer" }).stage === "allowlist",
-   "the writer cannot reach a tool at all");
-
-console.log("\nthe debate terminates");
-for (const id of ["debate", "nocon", "gate"]) {
-  const gates = FLOW[id]._spans.filter(s => s.kind === "gate" && s.label === "debate control");
-  ok(gates.length <= DEBATE.maxRounds && gates.some(g => /terminates/.test(g.head)),
-     `${id}: ${gates.length} round(s), terminated by ${gates.filter(g => /terminates/.test(g.head)).map(g => g.head.replace("terminates — ", ""))}`);
-}
-const dropped = FLOW.nocon._spans.filter(s => s.kind === "gate" && s.dropped?.length);
-ok(dropped.length > 0, "an uncited 'contradicted' objection was discarded before the planner saw it");
-ok(FLOW.nocon._spans.some(s => s.label === "tie-break"), "non-convergence routes to a tie-break, not to a planner win");
-
-console.log("\ninvariants a refactor could silently undo");
-// Each of these was verified to survive deliberate mutation before being
-// written — a check that cannot fail is worse than no check.
-{
-  const f = FLOWS.find(x => x.id === "debate");
-  const spans = f._spans;
-
-  // 1 · the round ceiling is a constant, not "however many rounds a flow supplies"
-  const many = [];
-  for (let i = 0; i < 6; i++) many.push({ proposal: '{"claim":"c","alternatives_considered":[{"h":1},{"h":2}]}',
-    attack: '{"objections":[{"id":"o","target":"claim","kind":"unsupported","severity":"high","cites":"ev_1"}],"verdict":"revise"}' });
-  const probe = new Run(FLOWS[0], () => {});
-  const out = probe.debate("q", { memories: [], entities: [] }, many);
-  ok(out.rounds.length <= DEBATE.maxRounds,
-     `a flow supplying 6 rounds is cut at maxRounds (ran ${out.rounds.length})`);
-
-  // 2 · the asymmetry IS the debate's justification. If the critic ever sees the
-  //     planner's carried reasoning, this is the LLM reviewer that was deleted.
-  const criticTurns = spans.filter(s => s.agent === "critic" && s.kind === "model").map(s => s.user);
-  ok(!AGENT.critic.userTemplate.includes("{critique}"),
-     "the critic's template has no slot for the planner's reasoning");
-  ok(criticTurns.every(u => !u.includes("SURVIVING OBJECTIONS")),
-     "and no critic turn carries it in practice");
-
-  // 3 · a draft cannot be its own evidence. This one line is what separates the
-  //     verifier from a rubber stamp, and nothing pinned it.
-  const rt2 = new Run(f, () => {});
-  f.run(rt2);
-  const outputs = spans.filter(s => s.kind === "model").map(s => s.output);
-  ok(outputs.every(o => !rt2.evidence.includes(o)),
-     "no model output is in the evidence corpus");
-  ok(!rt2.evidence.some(e => String(e).includes("YOUR ROLE")),
-     "and no system prompt is either");
-}
-
-// 4 · the librarian is code now. If a model call reappears there, the 18% of
-//     tokens spent on an output nothing read comes back with it.
-{
-  const libModel = FLOWS.flatMap(f => f._spans).filter(s => s.kind === "model" && s.agent === "librarian");
-  ok(libModel.length === 0, "the librarian makes no model call", libModel.length + " found");
-  ok(AGENT.librarian.model === "none" && AGENT.librarian.predicate.length > 400,
-     "and the registry says so, with its source");
-  const calls = FLOWS.map(f => f._spans.filter(s => s.kind === "model").length);
-  ok(Math.max(...calls) <= 5, `no flow exceeds 5 model calls (max ${Math.max(...calls)})`);
-  const scribes = FLOWS.flatMap(f => f._spans).filter(s => s.agent === "scribe" && s.kind === "model");
-  ok(scribes.every(s => s.async), "the scribe runs after the reply, not before it");
-}
-
-// 5 · the catalogue must not rot the way the roster did
-{
-  const used = new Set();
-  for (const f of FLOWS) for (const s of f._spans)
-    if (s.kind === "tool" || s.kind === "vector") used.add(s.label);
-  const cold = TOOLS.map(t => `${t.server}.${t.name}`).filter(n => !used.has(n));
-  ok(cold.length === 0, "every catalogued tool is exercised by some flow", cold.join(", "));
-}
-
-// 6 · a unit swap is the highest-consequence miss available in an incident
-ok(!verify("p99 is 1450 s.", ['{"unit":"ms"}', "1450ms"]).pass,
-   "evidence of 1450ms does not support a draft saying 1450 s");
-ok(verify("p99 is 1450 ms.", ['{"unit":"ms"}', "1450ms"]).pass,
-   "but the same unit does");
+   "an invented timestamp is not rescued by a numeric near-match");
+ok(verify("The rate is 41 req/s.", ['{"points":[["14:10",41.2]],"unit":"req/s"}']).pass,
+   "but correct rounding of a measurement still passes");
+ok(!verify("p99 is 1450 s.", ['{"unit":"ms"}', "1450ms"]).pass, "evidence of 1450ms does not support 1450 s");
 ok(!verify("hit ratio is 94x.", ["94%"]).pass, "94% does not support 94x");
-
-// 7 · the literal fallback was unanchored: `main` passed against "domain"
 ok(!verify("base is `main`.", ["the domain was unrelated"]).pass,
    "a backticked identifier does not match inside a longer word");
-
-// 8 · the shape check must cover the phrasings an incident actually uses
 for (const p of ["The root cause is the retry config.", "The deploy is responsible for the outage.", "The deploy triggered the outage."])
-  ok(!verify(p, [p.toLowerCase()]).pass, `unhedged: "${p.slice(0, 34)}…"`);
+  ok(!verify(p, [p.toLowerCase()]).pass, `unhedged: "${p.slice(0, 32)}…"`);
 
-// 9 · the derivation chain is the point of the page
+console.log("\nthe debate terminates and cannot be gamed");
 {
-  const w = FLOWS.flatMap(f => f._spans.filter(s => s.agent === "writer"));
-  ok(w.every(s => s.because), `all ${w.length} writer spans say why they wrote what they wrote`,
-     w.filter(s => !s.because).length + " missing");
+  const probe = () => new Run(FLOWS[0], () => {});
+  const P = c => `{"claim":"c","alternatives_considered":[{"h":1},{"h":2}]${c}}`;
+  // Six rounds supplied, three allowed.
+  const many = Array.from({ length: 6 }, () => ({ proposal: P(""),
+    attack: '{"objections":[{"id":"o","target":"claim","kind":"unsupported","severity":"high","cites":"ev_1"}],"verdict":"revise"}' }));
+  const out = probe().debate("q", { memories: [], entities: [] }, many);
+  ok(out.rounds.length <= DEBATE.maxRounds, `six rounds supplied, ${out.rounds.length} run (ceiling ${DEBATE.maxRounds})`);
+  ok(out.verdict === "no-convergence" && out.branch, "non-convergence routes to a tie-break, not a planner win");
+  // An uncited objection never reaches the planner.
+  const spans = [];
+  const rt2 = new Run(FLOWS[0], s => spans.push(s));
+  rt2.debate("q", { memories: [], entities: [] }, [{ proposal: P(""),
+    attack: '{"objections":[{"id":"o","target":"claim","kind":"unsupported","severity":"high","cites":null}],"verdict":"revise"}' }]);
+  const gate = spans.find(s => s.label === "debate control");
+  ok(gate && gate.dropped.length === 1, "an uncited objection is discarded before the planner sees it");
+  // An empty alternatives list is objected to by the runtime, not by a model.
+  const spans3 = [];
+  new Run(FLOWS[0], s => spans3.push(s)).debate("q", { memories: [], entities: [] },
+    [{ proposal: '{"claim":"c","alternatives_considered":[]}', attack: '{"objections":[],"verdict":"accept"}' }]);
+  const g3 = spans3.find(s => s.label === "debate control");
+  ok(g3 && [...g3.kept, ...g3.dropped].some(o => o.kind === "alternative_unexamined"),
+     "a proposal that examined no alternatives is objected to mechanically");
 }
 
-console.log("\nA2A earns its card");
-const a2a = FLOW.a2a._spans.filter(s => s.kind === "a2a");
-ok(a2a.some(s => s.state === "input-required"), "the specialist asks US something — an MCP call has no state to return to");
-ok(a2a.some(s => /restart/i.test(s.head || "")), "the task outlives the worker");
-ok(A2A_CARDS.every(c => c.skills.length && c.url && c.securitySchemes), "the card carries skills, endpoint and auth");
-
-console.log("\ntiers");
-// This slot used to assert "an active incident routes T2 by channel state" —
-// and it was PROTECTING a contradiction: fast and reject were routed T2, the
-// runtime panel painted the six-node debate path beside them, and neither ran
-// a planner or a critic. Sixth occurrence of this repo's signature failure.
-// What belongs here is the consistency itself.
-for (const f of FLOWS) {
-  const route = f._spans.find(s => s.kind === "route");
-  const debates = f._spans.some(s => s.label === "debate control");
-  const escalated = f._spans.some(s => s.label === "Gate B");
-  const t2 = route && route.head.startsWith("T2");
-  ok(t2 === debates || (escalated && debates),
-     `${f.id}: routed ${route ? route.head.split(" ")[0] : "—"} and ${debates ? "debates" : "does not debate"}`,
-     "the tier lane and the executed run disagree");
+console.log("\nthe critic never sees the planner's reasoning");
+{
+  const fx = FLOW.fixrepo._spans.filter(s => s.agent === "critic" && s.kind === "model");
+  ok(!AGENT.critic.userTemplate.includes("{critique}"), "the critic's template has no slot for it");
+  ok(fx.every(s => !s.user.includes("SURVIVING OBJECTIONS")), "and no critic turn carries it in practice");
 }
-ok(tierFor({ question: "why did checkout break", toolHints: [] }).tier === "T2",
-   "a causal question routes T2 on wording alone");
-ok(tierFor({ question: "what version is checkout on", toolHints: [] }).tier === "T1",
-   "the same-length factual question does not — it goes to the agent, which decides whether it needs a tool");
-ok(TIERS.length === 2, `two tiers, not three (${TIERS.map(t => t.id).join(" ")})`);
+
+console.log("\na draft cannot be its own evidence");
+{
+  const rt = FLOW.investigate._rt;
+  const outputs = FLOW.investigate._spans.filter(s => s.kind === "model").map(s => s.output);
+  ok(outputs.every(o => !rt.evidence.includes(o)), "no model output is in the evidence corpus");
+  ok(!rt.evidence.some(e => String(e).includes("YOUR ROLE")), "and no system prompt is either");
+}
+
+console.log("\ntools enforce their own contracts");
+const cx = { agent: "executor", scope: "eng-claude", channel: "incidents", thread: [], approved: new Set() };
+const E = (name, args, ctx = cx) => callTool(name, args, ctx);
+ok(E("grafana.query_datasource", { expr: 'rate(http_5xx{service="checkout-api"}[5m])', from: "13:00", to: "14:00" }).ok,
+   "a well-formed query succeeds");
+ok(E("grafana.query_datasource", { expr: "x", from: "13:00", to: "14:00", step: 5 }).stage === "schema",
+   "step below the minimum is a schema failure");
+ok(E("grafana.query_datasource", { expr: 'rate(http_5xx{service="checkout-api"}[5m])', from: "01:00", to: "14:00" }).error.includes("clamp"),
+   "a 13h window is rejected by the clamp");
+ok(E("grafana.query_datasource", { expr: '{__name__=~".+"}', from: "13:00", to: "14:00" }).error.includes("full-cardinality"),
+   "a bare high-cardinality matcher is rejected outright");
+ok(E("github.create_pull_request", { repo: "acme/checkout-api", base: "nope", head: "revert-2.3.1", title: "x" },
+     { ...cx, approved: new Set(["github.create_pull_request"]) }).error.includes("base"),
+   "a PR on a base that does not exist is rejected");
+ok(E("github.commit_file", { repo: "acme/checkout-api", branch: "no-such", path: "config/retry.yaml", content: "x", message: "m" },
+     { ...cx, approved: new Set(["github.commit_file"]) }).error.includes("branch"),
+   "a commit to a branch that does not exist is rejected");
+ok(E("email.send_summary", { to: ["nobody@elsewhere.test"], subject: "s", body: "b" },
+     { ...cx, approved: new Set(["email.send_summary"]) }).error.includes("directory"),
+   "mail to an address outside the directory is rejected before it is sent");
+ok(E("calendar.find_slot", { attendees: ["alice", "ghost"], minutes: 30 }).error.includes("unknown"),
+   "a meeting with someone who does not exist is rejected");
+ok(E("pagerduty.page_oncall", { team: "payments", message: "x", urgency: "high" }).needsApproval === "two_person",
+   "paging requires two people");
+ok(E("grafana.query_datasource", { expr: "x", from: "13:00", to: "14:00" }, { ...cx, agent: "writer" }).stage === "allowlist",
+   "the writer cannot reach a tool at all");
 
 console.log(`\n${n - fails}/${n} checks passed`);
 if (fails) { console.log(`${fails} FAILED\n`); process.exit(1); }

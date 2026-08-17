@@ -152,6 +152,30 @@ function spanBody(s) {
     if (s.exits) out.push(`<p class="why"><b>Termination bounds, any one sufficient:</b> ${s.exits.map(e => `<code>${esc(e)}</code>`).join(" · ")}</p>`);
   }
 
+  if (s.kind === "db") {
+    out.push(`<div class="meta">${kv("table", "<code>runs</code>")}${kv("latency", s.ms + " ms")}</div>`);
+    if (s.sql) out.push(pre("SQL", s.sql, "usr"));
+    if (s.then) out.push(`<p class="why then"><b>Why it is shaped that way:</b> ${esc(s.then)}</p>`);
+  }
+
+  if (s.kind === "memwrite") {
+    out.push(`<div class="meta">${kv("scope", `<code>${esc(s.rows[0].scope_id)}</code>`)}
+      ${kv("model", s.model)}${kv("dims", s.dims)}${kv("latency", s.ms + " ms")}</div>`);
+    out.push(`<div class="blk sys"><div class="blk-h">EMBEDDED ON WRITE <span>first 8 of ${s.dims}</span></div>
+      <pre>[${s.preview.join(", ")}, … ]</pre></div>`);
+    out.push(s.rows.map(r => `<div class="hit">
+        <div class="hit-h"><code>${esc(r.id)}</code><span>${esc(r.kind)}</span><em>${esc(r.provenance)}</em></div>
+        <p>${esc(r.text)}</p>
+        <div class="hit-m">subject <code>${esc(r.subject)}</code> · predicate <code>${esc(r.predicate)}</code>
+          · confirmed by ${r.confirmed_by ? esc(r.confirmed_by) : "<b>nobody</b>"}</div>
+      </div>`).join(""));
+    if (s.clashes.length) out.push(`<div class="blk err">
+      <div class="blk-h">CONTRADICTION — flagged, not merged</div><pre>${esc(j(s.clashes))}</pre></div>
+      <p class="why bad-note">Same <code>(subject, predicate)</code>, opposite sense. Near-identical
+      embeddings with opposite meanings — a similarity threshold would merge these and keep one at
+      random. Both stand until a human decides.</p>`);
+  }
+
   if (s.kind === "a2a") {
     out.push(`<div class="meta">${kv("task", `<code>${esc(s.taskId)}</code>`)}${kv("state", `<span class="a2a-st">${esc(s.state)}</span>`)}${kv("latency", s.ms + " ms")}</div>`);
     if (s.detail) out.push(`<div class="blk sys"><pre>${esc(s.detail)}</pre></div>`);
@@ -178,7 +202,7 @@ function verifyTable(rows, unhedged) {
   return t + h;
 }
 
-const KIND_LABEL = { model: "model", tool: "tool", vector: "vector", route: "route", verify: "verify", gate: "gate", a2a: "a2a" };
+const KIND_LABEL = { model: "model", tool: "tool", vector: "vector", route: "route", verify: "verify", gate: "gate", a2a: "a2a", db: "db", memwrite: "write" };
 
 function renderSpan(s, i) {
   const el = document.createElement("details");
@@ -196,6 +220,45 @@ function renderSpan(s, i) {
   return el;
 }
 
+/* What a scenario actually uses, DERIVED by running it. Declaring this on the
+   flow would be a second source of truth, which is the drift bug this repo
+   keeps re-learning. */
+function manifest(flow) {
+  const spans = [];
+  const rt = new Run(flow, x => spans.push(x));
+  try { flow.run(rt); } catch { /* surfaced in the trace itself */ }
+  const u = (k, f) => [...new Set(spans.filter(f).map(k))];
+  return {
+    prompts: u(s => (AGENT[s.agent] ? AGENT[s.agent].name : s.agent), s => s.kind === "model"),
+    db: u(s => s.label, s => s.kind === "db"),
+    mcp: u(s => s.label, s => s.kind === "tool" && s.ok !== false),
+    refused: u(s => s.label, s => s.kind === "tool" && s.ok === false && s.stage === "policy"),
+    vectors: spans.filter(s => s.kind === "vector").length,
+    memwrites: spans.filter(s => s.kind === "memwrite").reduce((a, x) => a + x.rows.length, 0),
+    a2a: spans.filter(s => s.kind === "a2a").length,
+    gate: spans.some(s => s.approval),
+    debate: spans.some(s => s.label === "debate control"),
+    tier: (spans.find(s => s.kind === "route") || {}).head,
+  };
+}
+
+const CAP_ROWS = [
+  ["prompts",  m => m.prompts.join(" · ")],
+  ["database", m => m.db.map(x => `<code>${esc(x)}</code>`).join(" ")],
+  ["vectors",  m => m.vectors ? `${m.vectors} scoped ${m.vectors === 1 ? "query" : "queries"}` + (m.memwrites ? ` · ${m.memwrites} written` : "") : ""],
+  ["mcp",      m => m.mcp.map(x => `<code>${esc(x)}</code>`).join(" ")],
+  ["refused",  m => m.refused.map(x => `<code>${esc(x)}</code>`).join(" ")],
+  ["a2a",      m => m.a2a ? `Incident Analyst · ${m.a2a} lifecycle states` : ""],
+  ["human",    m => m.gate ? "approval gate" + (m.debate ? ", after a debate" : "") : ""],
+];
+
+function renderUses(flow) {
+  const m = manifest(flow);
+  $("uses").innerHTML = `<div class="uses-h">${esc(flow.name)} <em>${esc(m.tier || "")}</em></div>` +
+    CAP_ROWS.map(([k, f]) => { const v = f(m); return v ? `<div class="use-row"><dt>${k}</dt><dd>${v}</dd></div>` : ""; }).join("") +
+    `<p class="use-note">${esc(flow.proves)}</p>`;
+}
+
 /* ─────────────── run ─────────────── */
 let running = false, lastRun = null;
 
@@ -205,6 +268,7 @@ async function play(flow) {
   document.querySelectorAll(".sc").forEach(b => b.disabled = true);
 
   setChannel(flow.channel);
+  renderUses(flow);
   $("msgs").innerHTML = "";
   $("trace").innerHTML = "";
   $("traceEmpty").style.display = "none";
