@@ -544,3 +544,60 @@ uncited `contradicted` objections, while the prompt and the protocol both said *
 objection is discarded — the code was the odd one out. And the schema validator rejected every key
 of a free-form object, which made the scheduler's `carry` payload unusable; a schema with no
 declared `properties` is now understood as deliberately open.
+
+
+---
+
+## 13 · Where the line runs
+
+One rule decides what is a prompt and what is a function:
+
+> **Judgement and reasoning → a model. Rules, facts, auth and execution → code.**
+
+The test for any new decision: could a careful person disagree about the answer? Then it is
+judgement. Is it a lookup, a comparison, a permission, or a side effect? Then it is code — and a
+model doing it is a liability, because it can be talked out of a rule and it cannot be audited.
+
+| | owner | |
+|---|---|---|
+| judgement | model | which path a question needs · the next tool call · what to propose · what to object to · what the humans read · what is worth remembering |
+| rules | code | the tier fallback · debate termination bounds · the objection filter · the verifier's set difference · the causal-shape check |
+| facts | code | a previous verifier rejection · a tool whose policy is not auto · what a metric read · what shipped |
+| auth | code | the per-agent allowlist · the scope predicate · policy classes · argument schemas and clamps |
+| execution | code | dedupe on `event_id` · the claim and its lease · the fenced right to post · credential injection at egress |
+
+**The pairs are the point.** Each judgement has a mechanical counterpart that bounds it. The router
+judges how much machinery a question needs; the allowlist that decides what may actually be called
+is code the router cannot influence. The Scribe judges what is worth remembering; the check that
+flags two opposite claims on the same `(subject, predicate)` is a comparison. The Writer judges what
+people read; the verifier that refuses an ungrounded number is a set difference.
+
+### Two things moved when this was applied
+
+**The router became a model call.** It was a regex over the question, defended with "an orchestrator
+that needs a model recreates the cost it exists to avoid". That was rhetorically neat and
+quantitatively wrong: a small classifier is about 1% of a T2 run, not comparable to one. Picking a
+path is a judgement — a careful person can disagree about whether a question is causal — so it
+belongs on a model. The regex survives as the fallback for when the classifier is unavailable,
+because a tier decision must never block on a model being up.
+
+Explaining the old regex is what killed it. Listed against real phrasings, `"did the cache deploy
+cause this?"` routed T1 — the exact question the escalation exists for — because the pattern held
+`caused` but not bare `cause`.
+
+**The retrieval query became a model output.** `tokensOf()` built it from the thread, and on the
+incident question it extracted exactly one entity: `14:02`. It missed `checkout`, because a regex
+keyed on dots and colons cannot know which words matter. Choosing search terms is a judgement. The
+router writes the query now, and the top retrieval score on that question went from **0.109 to
+0.264**.
+
+### What the router may and may not do
+
+It shapes the run: which tier, which tool servers get their schemas loaded, whether memory is worth
+reading, and whether to acknowledge now and answer later. Naming a server saves the agent from
+carrying eighteen schemas it will not use — between 258 and 818 tokens per run across the five
+scenarios.
+
+It **suggests, and never grants**. If it names a server the agent is not permitted to use, the call
+still fails at dispatch against an allowlist the router has no access to. That separation is what
+keeps a compromised or confused router from being an escalation path.

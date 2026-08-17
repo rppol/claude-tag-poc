@@ -420,9 +420,9 @@ function liveTier() {
   const q = $("input").value.trim();
   const el = $("tierLive");
   if (!q) { el.hidden = true; return; }
-  const d = tierFor({ question: q, toolHints: [], retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
+  const d = tierFallback({ question: q, retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
   el.hidden = false;
-  el.innerHTML = `<b>${d.tier}</b> <code>${esc(d.rule)}</code> <span>${esc(d.note)}</span>`;
+  el.innerHTML = `<b>${d.tier}</b> <code>${esc(d.rule)}</code> <span>${esc(d.note)}</span> <i class="fb">fallback regex — the shipped router is a small model call</i>`;
 }
 
 /* ─────────────── channels ─────────────── */
@@ -536,6 +536,8 @@ function renderArch() {
   };
   rows("failTable", ["Failure", "What stops it"], FAILS);
   rows("capTable", ["Quantity", "Value", "Basis"], CAP, "num");
+  rows("splitTable", ["Kind", "Owner", "Examples"],
+       SPLIT.map(([k, o, e]) => [k, `<b class="own-${o}">${o}</b>`, e]));
 
   $("phaseCards").innerHTML = PHASES.map(p => `
     <div class="ph"><div class="k">${p.k}</div><b>${p.n}</b><p>${p.p}</p><p class="gate">${p.g}</p></div>`).join("");
@@ -565,7 +567,7 @@ function boot() {
   $("form").addEventListener("submit", e => {
     e.preventDefault();
     const v = $("input").value.trim(); if (!v) return;
-    const d = tierFor({ question: v, toolHints: [], retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
+    const d = tierFallback({ question: v, retryReason: $("incToggle").checked ? "VERIFY_FAIL" : null });
     say("you", v);
     $("input").value = ""; liveTier();
     // Honest about what this does: the predicate is real, the run that follows

@@ -14,6 +14,31 @@
  */
 "use strict";
 
+/* ═══════════════ where the line runs ═══════════════
+   One rule decides what is a prompt and what is a function:
+
+     JUDGEMENT and REASONING  → a model
+     RULES, FACTS, AUTH, EXECUTION → code
+
+   Everything below follows from it. The router judges how much machinery a
+   question needs; the allowlist that decides what may actually be called is
+   code the router cannot influence. The Scribe judges what is worth
+   remembering; the contradiction check that flags two opposite claims is a
+   comparison. The Writer judges what people read; the verifier that refuses an
+   ungrounded number is a set difference.
+
+   The test for any new decision: could a careful person disagree about the
+   answer? Then it is judgement. Is it a lookup, a comparison, a permission, or
+   a side effect? Then it is code, and a model doing it is a liability — it can
+   be talked out of a rule, and it cannot be audited. */
+const SPLIT = [
+  ["judgement", "model", "which path a question needs · the next tool call · what to propose · what to object to · what the humans read · what is worth remembering"],
+  ["rules",     "code",  "the tier fallback · debate termination bounds · the objection filter · the verifier's set difference · the causal-shape check"],
+  ["facts",     "code",  "a previous verifier rejection · a tool whose policy is not auto · what a metric read · what shipped · who is on call"],
+  ["auth",      "code",  "the per-agent allowlist · the scope predicate · policy classes · argument schemas and clamps"],
+  ["execution", "code",  "dedupe on event_id · the claim and its lease · the fenced right to post · credential injection at egress"],
+];
+
 /* ═══════════════ tiers ═══════════════
    The reconciliation. A prior review collapsed nine nodes to five and killed
    the planner/critic split as "the model's own loop, hand-rolled". That finding
@@ -35,13 +60,17 @@ const TIERS = [
     when: "A causal question, a non-auto tool, or a verifier rejection on the last pass. Roughly one run in five." },
 ];
 
-/* The tier predicate. Pure code, no model call — an orchestrator that needed a
-   large model to choose a tier would recreate the cost it exists to avoid.
+/* The FALLBACK tier decision.
 
-   Why THESE conditions: they are the exact complement of what the mechanical
-   verifier covers. The verifier checks tokens, so it is blind to causation →
-   CAUSAL routes to debate. The verifier checks what is SAID, never what is
-   DONE, so it is blind to writes → a non-auto tool routes to debate. */
+   A regex over the question owned this for a while, on the argument that an
+   orchestrator needing a model recreates the cost it exists to avoid. That was
+   rhetorically neat and quantitatively wrong: a small classifier is about 1% of
+   a T2 run, not comparable to one. The real case for code was determinism, and
+   determinism is worth less here than getting the call right.
+
+   So a small model owns the judgement now, and this regex is what runs when
+   that model is unavailable or times out. A tier decision must never block on
+   a model being up — the question still has to be answered somehow. */
 // Bare `cause` was missing: "did the cache deploy cause this?" routed T1,
 // which is precisely the question this tier exists for. Found by listing what
 // the predicate does with real phrasings rather than by reading it.
@@ -58,7 +87,7 @@ const CAUSAL = /\b(why|root cause|causes?|caused|causing|because|correlat|same (
    which made this file's own claim that the five-node path is the default
    false in practice. A review caught the runtime panel painting the six-node
    debate path next to a trace containing no planner and no critic. */
-function tierFor(ctx) {
+function tierFallback(ctx) {
   if (ctx.retryReason === "VERIFY_FAIL")  return { tier: "T2", rule: 'retryReason === "VERIFY_FAIL"', note: "the writer already failed the mechanical check once, so the second pass gets an adversary" };
   if (CAUSAL.test(ctx.question))          return { tier: "T2", rule: `CAUSAL.test(question) === true`, note: "a causal claim is exactly what the verifier cannot check" };
   return { tier: "T1", rule: "(default)", note: "the agent decides for itself whether a tool is needed" };
@@ -83,27 +112,73 @@ Four rules bind every agent here:
 /* ═══════════════ agents ═══════════════ */
 const AGENTS = [
   {
-    id: "orchestrator", name: "Orchestrator", model: "none", budget: 0, colour: "#A683D6", stage: "core",
+    id: "orchestrator", name: "Orchestrator", model: "small", budget: 700, colour: "#A683D6", stage: "core",
     tier: "all", onPath: true,
-    owns: "How much machinery this run gets. It never drops a run.",
-    inputs: "queued run + channel binding",
-    output: `{ tier: "T0"|"T1"|"T2", rule: string, note: string }`,
+    owns: "How this run is shaped: which path, which tool servers, whether memory is worth reading.",
+    inputs: "question + thread + channel state",
+    output: `{ tier, signals[], servers[], needs_memory, memory_query, reply_style, reason }`,
     tools: [],
-    system: `(no model runs here — the tier predicate is pure code)
+    system: `${PREAMBLE}
 
-An earlier review killed a Router node for two reasons: an @mention already
-carries an intent a human deliberately chose, and its drop edge produced
-silence — the worst outcome available to this system.
+YOUR ROLE: Orchestrator. One call, one decision, before anything expensive happens: does this question need an adversary?
 
-The Orchestrator sits in the same position and owns a different decision, and
-it has NO drop edge: every input exits to some tier. Both objections go away
-without contradicting either review.
+There are two paths.
 
-It is code rather than a model call because an orchestrator that needed a large
-model to choose a tier would recreate the exact cost it exists to avoid.`,
-    predicate: tierFor.toString(),
-    userTemplate: `(mechanical — no prompt)`,
-    fails: "Sends everything to debate, and p95 doubles for no gain. The predicate is mechanical precisely so this is auditable from traces rather than argued about.",
+T1 — one agent looks things up and writes an answer. A mechanical verifier then checks every number, timestamp, version and name in the draft against what the tools actually returned. This is right for the large majority of questions.
+
+T2 — a planner proposes an answer and a critic attacks it before anything is written. It costs roughly three times the tokens and adds about 25 seconds.
+
+Route T2 if ANY of these hold, and name which in "signals":
+- CAUSAL — the answer will have to assert that one thing caused another. The verifier can confirm that "41 req/s" and "14:01" both appear in the evidence, and still not notice that the link between them was invented. This is its blind spot, and it is yours to cover.
+- CONTESTED — the thread already contains two incompatible explanations from different people. Picking one silently is worse than saying they disagree.
+- IRREVERSIBLE — the likely answer recommends something that cannot be undone: a page, a revert, a deploy, a message to people outside the thread.
+
+Otherwise T1.
+
+On being wrong. Sending a T1 question to T2 costs one unnecessary debate — some tokens and some seconds. Sending a T2 question to T1 lets an unchecked causal claim reach a room of engineers during an incident, where someone will act on it. Those are not the same mistake, so lean toward T2 when genuinely unsure.
+
+"Unsure" does not mean "it mentions an incident". Most questions asked during an incident are lookups: what shipped, who is on call, what is the current rate. Those are T1 and the verifier handles them completely.
+
+You also shape the run. Three more fields, and each one has to earn itself:
+
+"servers" — which tool servers this question plausibly needs, from: {servers}.
+Only their schemas get loaded into the agent's context. Naming all of them wastes
+tokens; naming too few costs a round trip when the agent finds it cannot reach
+something. Name what the question actually implies and nothing else.
+
+You are suggesting, not granting. Which tools an agent may call is decided by an
+allowlist in code that you cannot influence. If you name a server the agent is
+not permitted to use, the call still fails at dispatch. Do not treat this field
+as a request for access.
+
+"memory_query" — if needs_memory is true, the sentence to search memory with.
+Write what you would type into a search box, not the user's question verbatim:
+name the service, the symptom and the shape of the thing, because the store is
+matched on terms rather than on intent. Empty string when needs_memory is false.
+
+"needs_memory" — false when the answer can only come from live lookups. Current
+config, who is on call, what shipped, what a metric reads now: none of those
+should be remembered, so retrieval is pure latency. True when the question
+reaches for something this channel learned before: a past incident, a decision,
+a convention.
+
+"reply_style" — "answer" normally. "ack_then_work" when the honest reply is a
+short acknowledgement now and the real answer later, because the work will take
+longer than someone will sit and watch.
+
+Return only the JSON object.`,
+    userTemplate: `CHANNEL: {channel}
+ASKED BY: {user}
+QUESTION: {question}
+
+THREAD ({n} messages):
+{transcript}`,
+    // Two things stay code, because they are facts rather than judgements:
+    // a previous verifier rejection, and a tool whose policy is not auto.
+    // The regex below is the fallback when the classifier is unavailable —
+    // the tier decision must never block on a model being up.
+    predicate: "(see runtime.js · Run.tier — VERIFY_FAIL and Gate B are code; the fallback regex is tierFallback)",
+    fails: "Two ways. It sends everything to T2 and p95 doubles for no gain — cheap to ablate: force T1 for a week and compare verifier rejection rates. Or it narrows `servers` too aggressively and the agent discovers mid-loop that it cannot reach what it needs, which costs a round trip and reads as the bot being confused.",
   },
 
   {
@@ -488,4 +563,4 @@ const DEBATE = {
 };
 
 if (typeof module !== "undefined")
-  module.exports = { AGENTS, AGENT, PREAMBLE, DEBATE, TIERS, tierFor, CAUSAL, escalatesOnWrite };
+  module.exports = { AGENTS, AGENT, PREAMBLE, DEBATE, TIERS, SPLIT, tierFallback, CAUSAL, escalatesOnWrite };

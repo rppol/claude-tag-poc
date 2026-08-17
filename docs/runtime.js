@@ -323,11 +323,25 @@ class Run {
   library(opts = {}) {
     const t0 = this.ms;
     this.fetchThread({ because: opts.because });
+    if (this.plan && this.plan.needs_memory === false) {
+      this.emit({
+        kind: "route", agent: "librarian", label: "retrieval skipped", ms: 1,
+        head: "needs_memory: false — nothing here is remembered",
+        note: "Current config, who is on call, what shipped, what a metric reads now: all of those are looked up fresh every time, so a retrieval would be pure latency.",
+        operands: { router_said: this.plan.reason }, fixture: null,
+      });
+      return { memories: [], entities: [], dropped: [] };
+    }
 
     // Entities, by the same extractor the verifier uses on the draft.
     const ents = [...new Set(this.thread.flatMap(m =>
       tokensOf(m.text).filter(t => t.cls === "ident" || t.cls === "version" || t.cls === "time")
         .map(t => t.raw.replace(/`/g, ""))))];
+    // The query is a JUDGEMENT, so the router writes it. tokensOf() ran here
+    // for a while and it showed: on the incident question it extracted exactly
+    // one entity — "14:02" — and missed "checkout", because a regex that keys
+    // on dots and colons cannot know which words matter. The mechanical build
+    // below is the fallback for when the router did not supply one.
     // Retrieve on the CONVERSATION, not just on the last line. "is this the
     // same root cause as March?" shares no keyword with "pool exhaustion after
     // a retry change" — but the message two above it says "March was the pool
@@ -336,7 +350,9 @@ class Run {
     // pretending otherwise would make the retrieval span a lie.
     const ask = this.sc.question.replace(/<@\w+>/g, "").trim();
     const recent = this.thread.slice(-4).map(m => m.text).join(" ");
-    const query = [ask, recent, ...ents].join(" ").slice(0, 300);
+    const query = (this.plan && this.plan.memory_query)
+      ? this.plan.memory_query
+      : [ask, recent, ...ents].join(" ").slice(0, 300);
 
     // Instruction-shaped text is FLAGGED here and enforced nowhere here — the
     // allowlist is the enforcement. A regex that thought it was a security
@@ -401,23 +417,76 @@ class Run {
     return d.hits;
   }
 
-  /* The tier decision — pure code, and the operands are shown alongside the
-     rule so a reader can see WHY this run took this path. */
-  tier(ctx) {
-    const d = tierFor({ ...ctx, question: this.sc.question });
-    const spec = TIERS.find(x => x.id === d.tier);
+  /* The router. A small model decides how this run is shaped; two things stay
+     code because they are facts rather than judgements, and the regex is the
+     fallback for when the model is unavailable. */
+  route(ctx = {}) {
+    let d, via, out = null;
+
+    // FACT, not judgement: the verifier already rejected a draft on this run.
+    if (ctx.retryReason === "VERIFY_FAIL") {
+      d = { tier: "T2", signals: ["VERIFY_FAIL"], servers: ctx.servers || [], needs_memory: true,
+            reply_style: "answer", reason: "the writer already failed the mechanical check once, so the rewrite gets an adversary" };
+      via = "code · retryReason";
+    } else if (ctx.classify) {
+      out = ctx.classify;
+      try { d = JSON.parse(out); via = "model · small"; }
+      catch { d = null; }
+    }
+    if (!d) {
+      const f = tierFallback({ question: this.sc.question });
+      d = { tier: f.tier, signals: f.tier === "T2" ? ["CAUSAL"] : [], servers: ctx.servers || [],
+            needs_memory: true, reply_style: "answer", reason: f.note + " (fallback: the classifier did not answer)" };
+      via = "code · fallback regex";
+    }
+
+    const spec = TIERS.find(x => x.id === d.tier) || TIERS[0];
+    const all = [...new Set(TOOLS.map(t => t.server))];
+    const loaded = TOOLS.filter(t => (d.servers || []).includes(t.server));
+    const savedTok = TOOLS.filter(t => !(d.servers || []).includes(t.server))
+      .reduce((a, t) => a + tok(JSON.stringify(t.params)) + tok(t.desc), 0);
+
+    if (via === "model · small") {
+      const a = AGENT.orchestrator;
+      const user = a.userTemplate.replace(/\{(\w+)\}/g, (_, k) => ({
+        channel: this.channel, user: this.sc.asker, question: this.sc.question,
+        n: this.thread.length, transcript: fmtThread(this.thread),
+        servers: all.join(", "),
+      }[k] ?? `«${k}»`));
+      const sysUser = a.system.replace("{servers}", all.join(", "));
+      const tin = tok(sysUser) + tok(user), tout = tok(out);
+      this.tokIn += tin; this.tokOut += tout;
+      const ms = 120 + Math.round(tin * 0.04);
+      this.ms += ms;
+      this.emit({
+        kind: "model", agent: "orchestrator", label: "Orchestrator", model: "small", ms,
+        head: `${d.tier} · ${(d.signals || []).join(", ") || "no escalation signal"}`,
+        tokIn: tin, tokOut: tout, budget: a.budget,
+        system: sysUser, user, output: out,
+        because: d.reason,
+        fixture: "the model's output text",
+      });
+    }
+
     this.emit({
-      kind: "route", agent: "orchestrator", label: "tier predicate", ms: 1,
-      head: `${d.tier} · ${spec.name}`, rule: d.rule, note: d.note,
-      operands: { question: this.sc.question,
-                  toolHints: ctx.toolHints || [], retryReason: ctx.retryReason || null,
-                  "CAUSAL.test(question)": CAUSAL.test(this.sc.question) },
-      path: spec.nodes, source: AGENT.orchestrator.predicate,
-      fixture: null,
+      kind: "route", agent: "orchestrator", label: "route decided", ms: 1,
+      head: `${d.tier} · ${spec.name} · ${loaded.length}/${TOOLS.length} tool schemas loaded`,
+      rule: via,
+      note: `Suggested, not granted — the allowlist that decides what may actually be called is code the router cannot influence.`,
+      operands: { tier: d.tier, signals: d.signals, servers: d.servers,
+                  needs_memory: d.needs_memory, reply_style: d.reply_style,
+                  schemas_loaded: loaded.map(t => `${t.server}.${t.name}`),
+                  tokens_not_loaded: savedTok },
+      path: spec.nodes, fixture: null,
     });
+
     this.tierId = d.tier;
+    this.plan = d;
     return d;
   }
+
+  // Kept so older call sites read the same; the router owns the decision now.
+  tier(ctx = {}) { return this.route(ctx); }
 
   /* The debate. Termination is enforced here, not requested in a prompt, and
      objections are filtered mechanically before the planner ever sees them. */

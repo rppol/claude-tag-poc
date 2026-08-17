@@ -30,7 +30,11 @@ const FLOWS = [
     proves: "The second tool call is chosen from the first one's result. A fixed plan could not know which deploy window to ask about, because the window comes from where the metric stepped.",
     run(rt) {
       rt.accept("e_401");
-      rt.tier({ toolHints: ["grafana"] });
+      rt.route({ classify: `{"tier":"T1","signals":[],
+ "servers":["slack","memory","grafana","github","pagerduty"],
+ "needs_memory":true,
+ "memory_query":"checkout-api 5xx errors elevated deploy retry config","reply_style":"answer",
+ "reason":"a where-do-I-start question. It asks what to look at, not what caused what — the answer will be a set of lookups, and the verifier can check every one of them. Memory is worth reading because this channel has seen checkout incidents before."}` });
       const ctx = rt.library({ because: "the thread names a service and a rough time, and nothing else" });
 
       rt.tool("executor", "grafana.list_metrics", { service: "checkout-api" },
@@ -89,7 +93,10 @@ const FLOWS = [
     proves: "Sending mail and booking time are the two writes people most want to see before they happen. The slot is derived from real free/busy, and the full body is shown before it leaves.",
     run(rt) {
       rt.accept("e_402");
-      rt.tier({ toolHints: ["calendar"] });
+      rt.route({ classify: `{"tier":"T1","signals":["IRREVERSIBLE"],
+ "servers":["slack","github","grafana","calendar","email"],
+ "needs_memory":false,"memory_query":"","reply_style":"answer",
+ "reason":"mail and a calendar invite are both irreversible, but priya asked for them directly — an explicit instruction is not a recommendation to argue with, so the policy gate is the right control here rather than a debate. Memory is skipped: a writeup states what shipped and what a metric read, and both are looked up fresh."}` });
       const ctx = rt.library({ because: "a writeup is assembled from what the incident established, so the recall matters more than the last message" });
 
       // Rebuild the facts rather than trusting memory — a summary that quotes a
@@ -165,7 +172,11 @@ const FLOWS = [
     proves: "A write escalates to debate BEFORE the human is asked, so the approval is the second review rather than the only one. Branch creation is auto because it is reversible; the commit is not.",
     run(rt) {
       rt.accept("e_403");
-      rt.tier({ toolHints: ["github"] });
+      rt.route({ classify: `{"tier":"T2","signals":["CAUSAL","IRREVERSIBLE"],
+ "servers":["slack","memory","github"],
+ "needs_memory":true,
+ "memory_query":"checkout-api retry max_attempts default pool sizing","reply_style":"answer",
+ "reason":"two reasons at once. 'why is max_attempts allowed to be 0 at all' asks about cause, which the verifier cannot check. And the fix is a commit, which it cannot see. Both of its blind spots in one question."}` });
       const ctx = rt.library({ because: "the ask names an issue number, so the issue is the context — not the metrics" });
 
       const iss = rt.tool("executor", "github.get_issue", { repo: "acme/checkout-api", number: 812 },
@@ -249,7 +260,10 @@ const FLOWS = [
     proves: "Long-horizon work is a row, not a held thread. The worker exits, the lease expires cleanly, and a different worker picks the run up an hour later with the context it needs carried on the row.",
     run(rt) {
       rt.accept("e_404");
-      rt.tier({ toolHints: ["scheduler"] });
+      rt.route({ classify: `{"tier":"T1","signals":[],
+ "servers":["slack","grafana","scheduler"],
+ "needs_memory":false,"memory_query":"","reply_style":"ack_then_work",
+ "reason":"nothing to decide yet — the question is about a measurement that does not exist for another hour. Acknowledge now, do the work later. Nothing in memory helps: what 'held' means is a metric read, not a recollection."}` });
       const ctx = rt.library({ because: "the ask is about something that has not happened yet, so the useful context is what 'held' would mean" });
 
       rt.tool("executor", "grafana.query_datasource",
@@ -334,7 +348,11 @@ const FLOWS = [
     proves: "A memory is only written when a tool asserted it or a human confirmed it, it carries provenance, a contradiction on the same subject is flagged rather than merged, and the scope wall holds when the same question is asked from another channel.",
     run(rt) {
       rt.accept("e_405");
-      rt.tier({ toolHints: [] });
+      rt.route({ classify: `{"tier":"T1","signals":[],
+ "servers":["slack","memory","github"],
+ "needs_memory":true,
+ "memory_query":"checkout-api retry max_attempts pool.max lessons resolutions","reply_style":"answer",
+ "reason":"a write to memory, which means reading it first — a duplicate is worse than nothing, and a contradiction has to be found before it can be flagged."}` });
       const ctx = rt.library({ because: "before writing anything, see what is already known — a duplicate memory is worse than none" });
 
       rt.tool("executor", "github.get_config", { repo: "acme/checkout-api", keys: ["retry.max_attempts", "pool.max"] },

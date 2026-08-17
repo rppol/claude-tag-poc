@@ -662,3 +662,7 @@ h2,h3,.sub-h{text-wrap:balance}
 .why.out b{color:var(--mint);font-family:var(--body)}
 .why.quiet{border-left-color:var(--ink-3);color:var(--mono-quiet);font-size:11.5px}
 .blk.out .blk-h{color:var(--mint)}
+#splitTable .trow{grid-template-columns:110px 84px 1fr}
+.own-model{color:var(--amber);font-family:var(--code);font-size:12px}
+.own-code{color:var(--mint);font-family:var(--code);font-size:12px}
+.tier-live .fb{font-style:normal;color:var(--dim);font-size:10.5px;font-family:var(--code)}
